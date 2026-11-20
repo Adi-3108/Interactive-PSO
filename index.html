@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="SwarmLab — An interactive browser-based tool for learning Particle Swarm Optimization (PSO).">
+  <meta name="color-scheme" content="light dark">
+  <title>SwarmLab — Interactive PSO</title>
+
+  <!-- Design System CSS -->
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+
+  <!-- Skip-to-content -->
+  <a href="#main-canvas" class="skip-link">Skip to main content</a>
+
+  <div class="app" id="app">
+
+    <!-- ============ TOP BAR ============ -->
+    <header class="topbar" role="banner">
+      <div class="topbar__logo" aria-label="SwarmLab">
+        <!-- Logo icon placeholder -->
+        <span aria-hidden="true">🐝</span>
+        <span>SwarmLab</span>
+      </div>
+
+      <span class="topbar__problem-name" id="topbar-problem-name">Sphere 2D</span>
+
+      <!-- Mode tabs (desktop) -->
+      <nav class="topbar__tabs tabs" role="tablist" aria-label="Application mode">
+        <button class="tab" role="tab" id="tab-learn" aria-selected="true" aria-controls="panel-learn">Learn</button>
+        <button class="tab" role="tab" id="tab-handcalc" aria-selected="false" aria-controls="panel-handcalc">Hand-Calc Lab</button>
+        <button class="tab" role="tab" id="tab-predict" aria-selected="false" aria-controls="panel-predict">Predict</button>
+        <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="panel-compare">Compare</button>
+      </nav>
+
+      <!-- Actions -->
+      <div class="topbar__actions">
+        <button class="btn btn--secondary btn--sm learn-trigger" id="btn-open-learn" type="button">Learn PSO</button>
+        <label class="toggle" title="Colour-blind safe mode">
+          <input type="checkbox" class="toggle__input" id="toggle-colorblind" aria-label="Toggle colour-blind safe mode">
+          <span class="toggle__track"><span class="toggle__thumb"></span></span>
+          <span class="toggle__label sr-only">Colour-blind mode</span>
+        </label>
+
+        <button class="btn btn--icon" id="btn-theme-toggle" aria-label="Toggle dark mode" type="button">
+          <span aria-hidden="true">🌙</span>
+        </button>
+
+        <button class="btn btn--icon" id="btn-help" aria-label="Help and keyboard shortcuts" type="button">
+          <span aria-hidden="true">?</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ============ WORKSPACE (3-zone layout) ============ -->
+    <main class="workspace" id="workspace">
+
+      <!-- Drawer toggle buttons (tablet/mobile) -->
+      <button class="drawer-toggle drawer-toggle--left" id="btn-toggle-left" aria-label="Toggle left panel" type="button" aria-expanded="false">
+        <span aria-hidden="true">☰</span>
+      </button>
+      <button class="drawer-toggle drawer-toggle--right" id="btn-toggle-right" aria-label="Toggle right panel" type="button" aria-expanded="false">
+        <span aria-hidden="true">▶</span>
+      </button>
+
+      <!-- Drawer backdrop -->
+      <div class="drawer-backdrop" id="drawer-backdrop" aria-hidden="true"></div>
+
+      <!-- ===== LEFT PANEL ===== -->
+      <aside class="panel-left" id="panel-left" role="complementary" aria-label="Problem and parameter configuration">
+
+        <!-- Problem Picker -->
+        <section class="panel-section" aria-labelledby="section-problems-title">
+          <h2 class="panel-section__title" id="section-problems-title">Problems</h2>
+          <div id="problem-list" role="listbox" aria-label="Problem selection">
+            <!-- Problem cards rendered by JS -->
+          </div>
+        </section>
+
+        <!-- Custom Function -->
+        <section class="panel-section panel-section--secondary" aria-labelledby="section-custom-title">
+          <div class="collapsible" data-collapsible>
+            <button class="collapsible__trigger" aria-expanded="false" aria-controls="custom-content" type="button">
+              <span id="section-custom-title">Use a custom objective</span>
+              <span class="collapsible__icon" aria-hidden="true">▾</span>
+            </button>
+            <div class="collapsible__content" id="custom-content" aria-hidden="true">
+              <div class="collapsible__body form-row">
+                <label for="input-custom-fn">Expression</label>
+                <input type="text" class="num-input" id="input-custom-fn" placeholder="e.g. x^2 + y^2" autocomplete="off" spellcheck="false">
+                <span class="sr-only" id="custom-fn-error" role="alert"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Parameters -->
+        <section class="panel-section" aria-labelledby="section-params-title">
+          <h2 class="panel-section__title" id="section-params-title">Parameters</h2>
+
+          <!-- Swarm size -->
+          <div class="param-group">
+            <label class="param-label" for="param-n">
+              N (swarm size)
+              <span class="tooltip-wrapper">
+                <button class="tooltip-trigger" aria-label="Info about swarm size" type="button">ⓘ</button>
+                <span class="tooltip" role="tooltip">Number of particles in the swarm (1-100).</span>
+              </span>
+            </label>
+            <input type="range" class="range-input" id="param-n-slider" min="1" max="100" value="30">
+            <input type="number" class="num-input" id="param-n" min="1" max="100" value="30" aria-label="Swarm size">
+          </div>
+
+          <!-- Inertia -->
+          <div class="param-group">
+            <label class="param-label" for="param-w">
+              w (inertia)
+              <span class="tooltip-wrapper">
+                <button class="tooltip-trigger" aria-label="Info about inertia weight" type="button">ⓘ</button>
+                <span class="tooltip" role="tooltip">Inertia weight controls momentum of particles.</span>
+              </span>
+            </label>
+            <input type="range" class="range-input" id="param-w-slider" min="0" max="1.5" step="0.01" value="0.729">
+            <input type="number" class="num-input" id="param-w" min="0" max="1.5" step="0.01" value="0.729" aria-label="Inertia weight">
+          </div>
+
+          <!-- Cognitive (c1) -->
+          <div class="param-group">
+            <label class="param-label" for="param-c1">
+              c₁ (cognitive)
+              <span class="tooltip-wrapper">
+                <button class="tooltip-trigger" aria-label="Info about cognitive coefficient" type="button">ⓘ</button>
+                <span class="tooltip" role="tooltip">Personal best attraction weight.</span>
+              </span>
+            </label>
+            <input type="range" class="range-input" id="param-c1-slider" min="0" max="4" step="0.01" value="1.494">
+            <input type="number" class="num-input" id="param-c1" min="0" max="4" step="0.01" value="1.494" aria-label="Cognitive coefficient">
+          </div>
+
+          <!-- Social (c2) -->
+          <div class="param-group">
+            <label class="param-label" for="param-c2">
+              c₂ (social)
+              <span class="tooltip-wrapper">
+                <button class="tooltip-trigger" aria-label="Info about social coefficient" type="button">ⓘ</button>
+                <span class="tooltip" role="tooltip">Global best attraction weight.</span>
+              </span>
+            </label>
+            <input type="range" class="range-input" id="param-c2-slider" min="0" max="4" step="0.01" value="1.494">
+            <input type="number" class="num-input" id="param-c2" min="0" max="4" step="0.01" value="1.494" aria-label="Social coefficient">
+          </div>
+
+          <!-- Vmax -->
+          <div class="param-group">
+            <label class="param-label" for="param-vmax">
+              Vmax (% of range)
+              <span class="tooltip-wrapper">
+                <button class="tooltip-trigger" aria-label="Info about velocity clamping" type="button">ⓘ</button>
+                <span class="tooltip" role="tooltip">Maximum velocity as percentage of domain range.</span>
+              </span>
+            </label>
+            <input type="range" class="range-input" id="param-vmax-slider" min="1" max="100" value="50">
+            <input type="number" class="num-input" id="param-vmax" min="1" max="100" value="50" aria-label="Vmax percentage">
+          </div>
+
+          <!-- Max iterations -->
+          <div class="param-group">
+            <label class="param-label" for="param-maxiter">Max Iterations</label>
+            <input type="number" class="num-input" id="param-maxiter" min="1" max="10000" value="100" aria-label="Maximum iterations">
+          </div>
+
+          <!-- Seed -->
+          <div class="param-group">
+            <label class="param-label" for="param-seed">Seed</label>
+            <div class="form-row--inline">
+              <input type="number" class="num-input" id="param-seed" min="0" value="42" aria-label="Random seed">
+              <button class="btn btn--secondary btn--sm" id="btn-random-seed" type="button" aria-label="Random seed">🎲</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Advanced Options -->
+        <div class="collapsible" id="collapsible-advanced">
+          <button class="collapsible__trigger" aria-expanded="false" aria-controls="advanced-content" type="button">
+            Advanced Options
+            <span class="collapsible__icon" aria-hidden="true">▾</span>
+          </button>
+          <div class="collapsible__content" id="advanced-content" aria-hidden="true">
+            <div class="collapsible__body">
+              <!-- Boundary handling -->
+              <div class="form-row">
+                <label class="param-label" for="param-boundary">Boundary</label>
+                <select class="num-input" id="param-boundary" aria-label="Boundary handling">
+                  <option value="clamp">Clamp</option>
+                  <option value="reflect">Reflect</option>
+                  <option value="absorb">Absorb</option>
+                </select>
+              </div>
+
+              <!-- Topology -->
+              <div class="form-row">
+                <label class="param-label" for="param-topology">Topology</label>
+                <select class="num-input" id="param-topology" aria-label="Swarm topology">
+                  <option value="global">Global (gbest)</option>
+                  <option value="ring">Ring (lbest)</option>
+                </select>
+              </div>
+
+              <!-- Update mode -->
+              <div class="form-row">
+                <label class="param-label" for="param-update-mode">Update Mode</label>
+                <select class="num-input" id="param-update-mode" aria-label="Update mode">
+                  <option value="synchronous">Synchronous</option>
+                  <option value="asynchronous">Asynchronous</option>
+                </select>
+              </div>
+
+              <!-- Inertia schedule -->
+              <div class="form-row">
+                <label class="param-label" for="param-inertia-schedule">Inertia Schedule</label>
+                <select class="num-input" id="param-inertia-schedule" aria-label="Inertia schedule">
+                  <option value="constant">Constant</option>
+                  <option value="linear">Linear Decay</option>
+                </select>
+              </div>
+
+              <!-- Constriction toggle -->
+              <label class="toggle">
+                <input type="checkbox" class="toggle__input" id="param-constriction" aria-label="Enable Clerc-Kennedy constriction">
+                <span class="toggle__track"><span class="toggle__thumb"></span></span>
+                <span class="toggle__label">Constriction (χ)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Presets -->
+        <section class="panel-section panel-section--secondary" aria-labelledby="section-presets-title">
+          <div class="collapsible" data-collapsible>
+            <button class="collapsible__trigger" aria-expanded="false" aria-controls="presets-content" type="button">
+              <span id="section-presets-title">Experiment presets</span>
+              <span class="collapsible__icon" aria-hidden="true">▾</span>
+            </button>
+            <div class="collapsible__content" id="presets-content" aria-hidden="true">
+              <div class="collapsible__body" id="preset-list">
+                <!-- Preset buttons rendered by JS -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </aside>
+
+      <!-- ===== CENTER PANEL ===== -->
+      <div class="panel-center" id="panel-center">
+
+        <!-- Main canvas -->
+        <div class="canvas-container" id="main-canvas">
+          <div class="simulation-hud" aria-live="polite">
+            <span class="simulation-hud__eyebrow">LIVE EXPERIMENT</span>
+            <strong id="simulation-phase">Ready to explore</strong>
+            <span id="simulation-subtitle">Press play to see the swarm learn the landscape.</span>
+          </div>
+          <canvas id="canvas-main" aria-label="PSO visualization canvas">
+            Your browser does not support HTML5 Canvas.
+          </canvas>
+          <!-- Force legend overlay -->
+          <div class="force-legend" id="force-legend" aria-label="Force vector legend">
+            <span class="force-legend__item">
+              <span class="force-legend__swatch" style="background:var(--c-force-inertia)"></span>
+              Inertia
+            </span>
+            <span class="force-legend__item">
+              <span class="force-legend__swatch" style="background:var(--c-force-cognitive)"></span>
+              Cognitive
+            </span>
+            <span class="force-legend__item">
+              <span class="force-legend__swatch" style="background:var(--c-force-social)"></span>
+              Social
+            </span>
+            <span class="force-legend__item">
+              <span class="force-legend__swatch" style="background:var(--c-force-resultant)"></span>
+              Resultant
+            </span>
+          </div>
+        </div>
+
+        <!-- Control bar -->
+        <div class="control-bar" id="control-bar" role="toolbar" aria-label="Playback controls">
+          <span class="control-bar__label">Playback</span>
+          <div class="transport">
+            <button class="transport__btn" id="btn-reset" aria-label="Reset" type="button">⏮</button>
+            <button class="transport__btn" id="btn-step-back" aria-label="Step back" type="button">⏪</button>
+            <button class="transport__btn transport__btn--play" id="btn-play" aria-label="Play / Pause" type="button">▶</button>
+            <button class="transport__btn" id="btn-step-forward" aria-label="Step forward" type="button">⏩</button>
+            <button class="transport__btn" id="btn-skip-end" aria-label="Skip to end" type="button">⏭</button>
+          </div>
+          <span class="transport__speed" id="speed-label">1×</span>
+          <input type="range" class="range-input" id="speed-slider" min="0.25" max="10" step="0.25" value="1" aria-label="Playback speed">
+          <span class="scrubber-label" id="iteration-label">Iter: 0 / 100</span>
+          <div class="form-row--inline" style="margin-left:auto">
+            <label class="toggle">
+              <input type="checkbox" class="toggle__input" id="toggle-micro" aria-label="Toggle micro-step mode">
+              <span class="toggle__track"><span class="toggle__thumb"></span></span>
+              <span class="toggle__label">Micro</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Timeline / scrubber -->
+        <div class="timeline" id="timeline" aria-label="Iteration timeline">
+          <span class="scrubber-label">0</span>
+          <input type="range" class="scrubber" id="timeline-scrubber" min="0" max="100" value="0" aria-label="Timeline scrubber">
+          <span class="scrubber-label" id="timeline-max">100</span>
+        </div>
+
+        <!-- Bottom tabs -->
+        <div class="bottom-tabs" id="bottom-tabs">
+          <div class="bottom-tabs__header" role="tablist" aria-label="Data views">
+            <button class="tab" role="tab" id="btab-table" aria-selected="true" aria-controls="btab-panel-table">State</button>
+            <button class="tab" role="tab" id="btab-convergence" aria-selected="false" aria-controls="btab-panel-convergence">Convergence</button>
+            <button class="tab" role="tab" id="btab-formula" aria-selected="false" aria-controls="btab-panel-formula">Formula</button>
+            <button class="tab tab--contextual" role="tab" id="btab-compare" aria-selected="false" aria-controls="btab-panel-compare">Compare</button>
+          </div>
+
+          <!-- Table panel -->
+          <div class="bottom-tabs__content" id="btab-panel-table" role="tabpanel" aria-labelledby="btab-table">
+            <table class="data-table" id="particle-table" aria-label="Particle data table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>x</th>
+                  <th>y</th>
+                  <th>f(x,y)</th>
+                  <th>vx</th>
+                  <th>vy</th>
+                  <th>pbest</th>
+                  <th>f(pbest)</th>
+                </tr>
+              </thead>
+              <tbody id="particle-table-body">
+                <!-- Rows rendered by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Convergence panel -->
+          <div class="bottom-tabs__content" id="btab-panel-convergence" role="tabpanel" aria-labelledby="btab-convergence" hidden>
+            <canvas id="canvas-convergence" aria-label="Convergence chart"></canvas>
+            <details class="analytics-disclosure" id="diversity-details">
+              <summary>Show diversity diagnostics</summary>
+              <canvas id="canvas-diversity" aria-label="Swarm diversity chart"></canvas>
+            </details>
+          </div>
+
+          <!-- Formula panel -->
+          <div class="bottom-tabs__content" id="btab-panel-formula" role="tabpanel" aria-labelledby="btab-formula" hidden>
+            <div id="formula-display" class="narrator__formula">
+              <!-- Formula rendering by JS -->
+            </div>
+          </div>
+
+          <!-- Compare panel -->
+          <div class="bottom-tabs__content" id="btab-panel-compare" role="tabpanel" aria-labelledby="btab-compare" hidden>
+            <div id="compare-display">
+              <!-- Comparison rendered by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Mobile mode tabs -->
+        <nav class="mobile-mode-tabs" role="tablist" aria-label="Application mode (mobile)">
+          <button class="tab" role="tab" aria-selected="true">Learn</button>
+          <button class="tab" role="tab" aria-selected="false">Hand-Calc</button>
+          <button class="tab" role="tab" aria-selected="false">Predict</button>
+          <button class="tab" role="tab" aria-selected="false">Compare</button>
+        </nav>
+      </div>
+
+      <!-- ===== RIGHT PANEL ===== -->
+      <aside class="panel-right" id="panel-right" role="complementary" aria-label="Narrator and swarm health">
+
+        <!-- Narrator -->
+        <section class="panel-section" aria-labelledby="section-narrator-title">
+          <h2 class="panel-section__title" id="section-narrator-title">Narrator</h2>
+          <div class="narrator" id="narrator" aria-live="polite" aria-atomic="false">
+            <div class="narrator__step" id="narrator-current">
+              Press <kbd>▶</kbd> or <kbd>Space</kbd> to start the swarm.
+            </div>
+          </div>
+        </section>
+
+        <!-- Swarm Health -->
+        <section class="panel-section" aria-labelledby="section-health-title">
+          <h2 class="panel-section__title" id="section-health-title">Swarm Health</h2>
+
+          <div class="health-meter" id="health-diversity">
+            <div class="health-meter__label">
+              <span>Diversity</span>
+              <span id="health-diversity-value">—</span>
+            </div>
+            <div class="health-meter__bar">
+              <div class="health-meter__fill" id="health-diversity-fill" style="width:50%"></div>
+            </div>
+          </div>
+
+          <div class="health-meter" id="health-convergence">
+            <div class="health-meter__label">
+              <span>Convergence</span>
+              <span id="health-convergence-value">—</span>
+            </div>
+            <div class="health-meter__bar">
+              <div class="health-meter__fill" id="health-convergence-fill" style="width:0%"></div>
+            </div>
+          </div>
+
+          <div class="health-meter" id="health-speed">
+            <div class="health-meter__label">
+              <span>Avg Speed</span>
+              <span id="health-speed-value">—</span>
+            </div>
+            <div class="health-meter__bar">
+              <div class="health-meter__fill" id="health-speed-fill" style="width:30%"></div>
+            </div>
+          </div>
+
+          <div class="param-group">
+            <span class="param-label">Global Best</span>
+            <span class="param-value" id="health-gbest">—</span>
+          </div>
+          <div class="param-group">
+            <span class="param-label">Best Fitness</span>
+            <span class="param-value" id="health-gbest-fitness">—</span>
+          </div>
+        </section>
+
+        <!-- Coach / Advisor -->
+        <section class="panel-section" aria-labelledby="section-coach-title">
+          <h2 class="panel-section__title" id="section-coach-title">Coach</h2>
+          <div id="coach-container">
+            <div class="coach-tip" id="coach-tip">
+              Adjust parameters on the left and watch how the swarm behaves. Try increasing <strong>c₁</strong> for more exploration!
+            </div>
+          </div>
+        </section>
+
+      </aside>
+
+    </main>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="app-footer" role="contentinfo">
+      <span>SwarmLab — Interactive PSO Teaching Tool</span>
+      <span id="verification-badge-area">
+        <!-- Verification badge rendered by JS -->
+      </span>
+    </footer>
+
+  </div><!-- /.app -->
+
+
+  <!-- ============ MODALS ============ -->
+
+  <!-- Help / Shortcuts Modal -->
+  <div class="modal-overlay" id="modal-help" role="dialog" aria-modal="true" aria-labelledby="modal-help-title">
+    <div class="modal">
+      <div class="modal__header">
+        <h2 class="modal__title" id="modal-help-title">Help &amp; Shortcuts</h2>
+        <button class="btn btn--icon" id="btn-close-help" aria-label="Close help" type="button">✕</button>
+      </div>
+      <div class="modal__body">
+        <h3>Keyboard Shortcuts</h3>
+        <table class="data-table" aria-label="Keyboard shortcuts">
+          <tbody>
+            <tr><td><kbd>Space</kbd></td><td>Play / Pause</td></tr>
+            <tr><td><kbd>→</kbd></td><td>Step forward</td></tr>
+            <tr><td><kbd>←</kbd></td><td>Step back</td></tr>
+            <tr><td><kbd>R</kbd></td><td>Reset</td></tr>
+            <tr><td><kbd>M</kbd></td><td>Toggle micro-step</td></tr>
+            <tr><td><kbd>D</kbd></td><td>Toggle dark mode</td></tr>
+            <tr><td><kbd>?</kbd></td><td>Show this dialog</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Close dialog / drawer</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--primary" id="btn-help-close-footer" type="button">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verification Details Modal -->
+  <div class="modal-overlay" id="modal-verification" role="dialog" aria-modal="true" aria-labelledby="modal-verification-title">
+    <div class="modal">
+      <div class="modal__header">
+        <h2 class="modal__title" id="modal-verification-title">Engine Verification</h2>
+        <button class="btn btn--icon" id="btn-close-verification" aria-label="Close verification details" type="button">✕</button>
+      </div>
+      <div class="modal__body" id="verification-body">
+        <!-- Verification results rendered by JS -->
+        <p>Verifying engine against textbook examples…</p>
+        <div class="skeleton skeleton--text"></div>
+        <div class="skeleton skeleton--text"></div>
+        <div class="skeleton skeleton--text"></div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--secondary" id="btn-rerun-verification" type="button">Re-run</button>
+        <button class="btn btn--primary" id="btn-verification-close-footer" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Learn PSO Drawer -->
+  <div class="drawer drawer--left" id="drawer-learn-pso" role="dialog" aria-modal="true" aria-labelledby="drawer-learn-title">
+    <div class="drawer__header">
+      <h2 class="modal__title" id="drawer-learn-title">Learn PSO</h2>
+      <button class="btn btn--icon" id="btn-close-learn" aria-label="Close learn PSO drawer" type="button">✕</button>
+    </div>
+    <div class="drawer__body" id="learn-pso-body">
+      <!-- PSO educational content rendered by JS -->
+    </div>
+  </div>
+  <div class="drawer-backdrop" id="drawer-learn-backdrop" aria-hidden="true"></div>
+
+
+  <!-- ============ GUIDED TOUR ============ -->
+  <div class="tour-overlay" id="tour-overlay" aria-label="Guided tour">
+    <div class="tour-backdrop"></div>
+
+    <!-- Step 1 -->
+    <div class="tour-step" id="tour-step-1" data-tour-step="1">
+      <div class="tour-step__progress">Step 1 of 6</div>
+      <h3 class="tour-step__title">Welcome to SwarmLab!</h3>
+      <p class="tour-step__body">SwarmLab helps you learn Particle Swarm Optimization interactively. Let's take a quick tour.</p>
+      <div class="tour-step__actions">
+        <button class="btn btn--secondary btn--sm" id="tour-skip" type="button">Skip tour</button>
+        <button class="btn btn--primary btn--sm" data-tour-next="2" type="button">Next →</button>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="tour-step" id="tour-step-2" data-tour-step="2">
+      <div class="tour-step__progress">Step 2 of 6</div>
+      <h3 class="tour-step__title">Choose a Problem</h3>
+      <p class="tour-step__body">Pick a benchmark function from the left panel, or type your own expression.</p>
+      <div class="tour-step__actions">
+        <button class="btn btn--secondary btn--sm" data-tour-prev="1" type="button">← Back</button>
+        <button class="btn btn--primary btn--sm" data-tour-next="3" type="button">Next →</button>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="tour-step" id="tour-step-3" data-tour-step="3">
+      <div class="tour-step__progress">Step 3 of 6</div>
+      <h3 class="tour-step__title">Tune Parameters</h3>
+      <p class="tour-step__body">Adjust w, c₁, c₂, swarm size, and more. Watch how they affect convergence.</p>
+      <div class="tour-step__actions">
+        <button class="btn btn--secondary btn--sm" data-tour-prev="2" type="button">← Back</button>
+        <button class="btn btn--primary btn--sm" data-tour-next="4" type="button">Next →</button>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="tour-step" id="tour-step-4" data-tour-step="4">
+      <div class="tour-step__progress">Step 4 of 6</div>
+      <h3 class="tour-step__title">Watch the Swarm</h3>
+      <p class="tour-step__body">The main canvas shows particles moving. Use transport controls to play, pause, or step through iterations.</p>
+      <div class="tour-step__actions">
+        <button class="btn btn--secondary btn--sm" data-tour-prev="3" type="button">← Back</button>
+        <button class="btn btn--primary btn--sm" data-tour-next="5" type="button">Next →</button>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div class="tour-step" id="tour-step-5" data-tour-step="5">
+      <div class="tour-step__progress">Step 5 of 6</div>
+      <h3 class="tour-step__title">Read the Narrator</h3>
+      <p class="tour-step__body">The right panel narrates each step, shows force decomposition, and gives coaching tips.</p>
+      <div class="tour-step__actions">
+        <button class="btn btn--secondary btn--sm" data-tour-prev="4" type="button">← Back</button>
+        <button class="btn btn--primary btn--sm" data-tour-next="6" type="button">Next →</button>
+      </div>
+    </div>
+
+    <!-- Step 6 -->
+    <div class="tour-step" id="tour-step-6" data-tour-step="6">
+      <div class="tour-step__progress">Step 6 of 6</div>
+      <h3 class="tour-step__title">Explore Modes</h3>
+      <p class="tour-step__body">Try Hand-Calc Lab to work through PSO by hand, Predict mode to guess the next step, or Compare to benchmark different settings.</p>
+      <div class="tour-step__actions">
+        <button class="btn btn--secondary btn--sm" data-tour-prev="5" type="button">← Back</button>
+        <button class="btn btn--primary btn--sm" id="tour-finish" type="button">Get Started! 🚀</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ============ TOAST CONTAINER ============ -->
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-label="Notifications">
+    <!-- Toasts appended by JS -->
+  </div>
+
+
+  <!-- ============ JS MODULE ENTRY ============ -->
+  <script type="module" src="js/ui/app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SwarmLab — Test Suite Runner</title>
+  <style>
+    :root {
+      --bg: #F7F8FA;
+      --surface: #FFFFFF;
+      --text: #1B2430;
+      --muted: #5B6778;
+      --border: #E3E7EE;
+      --success: #16A34A;
+      --danger: #DC2626;
+      --accent: #4F46E5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0E131B;
+        --surface: #161D28;
+        --text: #E8EDF4;
+        --muted: #9AA7B8;
+        --border: #263243;
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px 16px;
+      margin: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .summary-badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+    .badge--success {
+      background: rgba(22, 163, 74, 0.15);
+      color: var(--success);
+    }
+    .badge--danger {
+      background: rgba(220, 38, 38, 0.15);
+      color: var(--danger);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: rgba(0,0,0,0.03);
+      font-weight: 600;
+    }
+    .font-mono {
+      font-family: "JetBrains Mono", monospace;
+    }
+    .status-pass {
+      color: var(--success);
+      font-weight: 700;
+    }
+    .status-fail {
+      color: var(--danger);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>SwarmLab Automated Test Suite</h1>
+        <p style="color:var(--muted); margin:4px 0 0; font-size:13px;">
+          Verifies textbook calculations (Section 6) and invariant mathematical properties.
+        </p>
+      </div>
+      <div>
+        <a href="../../index.html" style="margin-right:12px; color:var(--accent); font-size:13px; text-decoration:none;">← Back to App</a>
+        <button class="btn" id="btn-run" type="button">Run Suite</button>
+      </div>
+    </header>
+
+    <div id="test-summary">Running verification tests...</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Test Name / Assertion</th>
+          <th>Expected</th>
+          <th>Actual</th>
+        </tr>
+      </thead>
+      <tbody id="test-rows">
+        <!-- Rendered by JS -->
+      </tbody>
+    </table>
+  </div>
+
+  <script type="module">
+    import { runVerification } from './verify.js';
+
+    function execute() {
+      const summaryEl = document.getElementById('test-summary');
+      const rowsEl = document.getElementById('test-rows');
+
+      const outcome = runVerification();
+
+      if (outcome.passed) {
+        summaryEl.innerHTML = `<span class="summary-badge badge--success">✔ ALL TESTS PASSED (${outcome.passedCount} / ${outcome.total})</span>`;
+      } else {
+        summaryEl.innerHTML = `<span class="summary-badge badge--danger">✖ SOME TESTS FAILED (${outcome.passedCount} / ${outcome.total})</span>`;
+      }
+
+      let html = '';
+      for (const r of outcome.results) {
+        html += `
+          <tr>
+            <td class="${r.passed ? 'status-pass' : 'status-fail'}">${r.passed ? '✔ PASS' : '✖ FAIL'}</td>
+            <td><strong>${r.name}</strong></td>
+            <td class="font-mono">${r.expected}</td>
+            <td class="font-mono">${r.actual}</td>
+          </tr>
+        `;
+      }
+      rowsEl.innerHTML = html;
+    }
+
+    document.getElementById('btn-run').addEventListener('click', execute);
+    execute();
+  </script>
+</body>
+</html>

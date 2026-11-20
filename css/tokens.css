@@ -1,0 +1,150 @@
+/* ============================================================
+   tokens.css — SwarmLab Design Tokens
+   CSS custom properties for the full design system.
+   ============================================================ */
+
+/* ----- Font stacks ----- */
+:root {
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code',
+    'SF Mono', 'Consolas', 'Liberation Mono', Menlo, monospace;
+
+  /* ----- Spacing scale (px) ----- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ----- Type scale ----- */
+  --fs-xs: 12px;
+  --fs-sm: 14px;
+  --fs-md: 16px;
+  --fs-lg: 20px;
+  --fs-xl: 28px;
+
+  /* ----- Border-radius ----- */
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* ----- Transitions ----- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 350ms;
+
+  /* ----- Accent & status colours (shared) ----- */
+  --c-accent: #0E7490;
+  --c-accent-hover: #155E75;
+  --c-accent-subtle: #DDF8F7;
+  --c-success: #16A34A;
+  --c-warning: #D97706;
+  --c-danger: #DC2626;
+  --c-gold: #F97352;
+
+  /* ----- Force decomposition colours ----- */
+  --c-force-inertia: #8A94A6;
+  --c-force-cognitive: #2563EB;
+  --c-force-social: #F97316;
+  --c-force-resultant: #111827;
+
+  /* ----- Particle palette — Okabe-Ito (colour-blind safe) ----- */
+  --c-particle-0: #E69F00;
+  --c-particle-1: #56B4E9;
+  --c-particle-2: #009E73;
+  --c-particle-3: #F0E442;
+  --c-particle-4: #0072B2;
+  --c-particle-5: #D55E00;
+  --c-particle-6: #CC79A7;
+  --c-particle-7: #000000;
+
+  /* ===== LIGHT THEME (default) ===== */
+  --c-bg: #0B1220;
+  --c-surface: #F7FAFC;
+  --c-text: #172033;
+  --c-muted: #64748B;
+  --c-border: #D9E2EC;
+  --c-surface-muted: #EEF4F7;
+  --c-surface-raised: #FFFFFF;
+  --c-text-strong: #172033;
+  --c-text-soft: #52677B;
+  --c-table-header: #EAF1F5;
+  --c-table-stripe: #F5F8FA;
+  --c-note-bg: #EFFBFB;
+  --c-note-border: #B8E5E4;
+  --c-note-text: #23465D;
+
+  /* Shadows — light */
+  --shadow-sm: 0 1px 2px rgba(27, 36, 48, 0.05);
+  --shadow-md: 0 4px 12px rgba(27, 36, 48, 0.08);
+  --shadow-lg: 0 8px 24px rgba(27, 36, 48, 0.12);
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.35);
+
+  /* Overlay */
+  --c-overlay: rgba(27, 36, 48, 0.45);
+}
+
+/* ===== DARK THEME ===== */
+[data-theme="dark"] {
+  --c-bg: #050A13;
+  --c-surface: #111C2E;
+  --c-text: #E6F0F7;
+  --c-muted: #94A9BA;
+  --c-border: #263B4D;
+  --c-surface-muted: #15263A;
+  --c-surface-raised: #17263A;
+  --c-text-strong: #F1F7FB;
+  --c-text-soft: #B6C7D5;
+  --c-table-header: #0C1726;
+  --c-table-stripe: #15263A;
+  --c-note-bg: #102B36;
+  --c-note-border: #1E7283;
+  --c-note-text: #D9F5F4;
+
+  --c-accent-subtle: #1E1B4B;
+  --c-force-resultant: #F3F4F6;
+  --c-particle-7: #FFFFFF;
+
+  /* Shadows — dark */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  --c-overlay: rgba(0, 0, 0, 0.6);
+
+  --focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.5);
+}
+
+/* ===== COLOUR-BLIND SAFE MODE ===== */
+[data-colorblind="true"] {
+  --c-force-cognitive: #332288;
+  --c-force-social: #AA4499;
+  --c-success: #117733;
+  --c-warning: #999933;
+  --c-danger: #882255;
+  --c-gold: #DDCC77;
+
+  --c-particle-0: #332288;
+  --c-particle-1: #88CCEE;
+  --c-particle-2: #44AA99;
+  --c-particle-3: #117733;
+  --c-particle-4: #999933;
+  --c-particle-5: #DDCC77;
+  --c-particle-6: #CC6677;
+  --c-particle-7: #AA4499;
+}
+
+/* ===== REDUCED MOTION ===== */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+    --duration-slow: 0ms;
+  }
+}
