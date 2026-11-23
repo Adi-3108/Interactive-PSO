@@ -11,14 +11,10 @@ export class CompareManager {
   /**
    * @param {HTMLElement} container
    * @param {Object} baseProblem
-   * @param {Object} paramsA
-   * @param {Object} paramsB
+   * @param {Object} params - Shared configuration for both swarms
    */
-  constructor(container, baseProblem, paramsA, paramsB) {
+  constructor(container, baseProblem, params) {
     this.container = container;
-    this.problem = baseProblem;
-    this.paramsA = { ...paramsA };
-    this.paramsB = { ...paramsB, topology: 'ring' }; // default difference: Global vs Ring
 
     this.engineA = null;
     this.engineB = null;
@@ -27,6 +23,13 @@ export class CompareManager {
     this.chart = null;
 
     this.initUI();
+    this.setExperiment(baseProblem, params);
+  }
+
+  setExperiment(problem, params) {
+    if (this.problem === problem && this.params === params) return;
+    this.problem = problem;
+    this.params = params;
     this.resetSwarms();
   }
 
@@ -38,7 +41,7 @@ export class CompareManager {
         <div style="margin-bottom: 16px;">
           <h2 style="font-size: 1.2rem; font-weight:700; margin:0;">A/B Experiment (Compare Mode)</h2>
           <p class="text-muted" style="margin:4px 0 0; font-size:13px;">
-            Run two swarms side by side with the exact same initial positions & seed to isolate parameter impacts.
+            Global and Ring use the same objective, parameters, seed, and starting positions.
           </p>
         </div>
 
@@ -57,11 +60,11 @@ export class CompareManager {
         <!-- Dual metric summary cards -->
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
           <div class="card" style="padding:12px; border:1px solid var(--border,#E3E7EE); border-radius:8px;">
-            <div style="font-weight:700; color:var(--c-accent,#4F46E5); margin-bottom:6px;">Swarm A (${this.paramsA.topology || 'global'})</div>
+            <div style="font-weight:700; color:var(--c-accent,#4F46E5); margin-bottom:6px;">Swarm A (Global)</div>
             <div style="font-size:13px;" id="comp-stat-a">Best f: — | Diversity: —</div>
           </div>
           <div class="card" style="padding:12px; border:1px solid var(--border,#E3E7EE); border-radius:8px;">
-            <div style="font-weight:700; color:var(--c-warning,#F59E0B); margin-bottom:6px;">Swarm B (${this.paramsB.topology || 'ring'})</div>
+            <div style="font-weight:700; color:var(--c-warning,#F59E0B); margin-bottom:6px;">Swarm B (Ring)</div>
             <div style="font-size:13px;" id="comp-stat-b">Best f: — | Diversity: —</div>
           </div>
         </div>
@@ -69,7 +72,7 @@ export class CompareManager {
         <!-- Overlaid convergence chart -->
         <div style="background:var(--c-surface-raised); border:1px solid var(--c-border); border-radius:8px; padding:12px;">
           <h4 style="margin:0 0 8px; font-size:13px;">Overlaid Convergence (Best-so-far)</h4>
-          <canvas id="comp-convergence-canvas" style="width:100%; height:180px;"></canvas>
+          <canvas id="comp-convergence-canvas" aria-label="Best fitness over time for Swarm A (Global) and Swarm B (Ring)" style="width:100%; height:180px;"></canvas>
         </div>
       </div>
     `;
@@ -88,33 +91,25 @@ export class CompareManager {
 
     const canvas = this.container.querySelector('#comp-convergence-canvas');
     if (canvas) {
-      this.chart = new ChartRenderer(canvas, { type: 'convergence' });
+      this.chart = new ChartRenderer(canvas, { type: 'convergence', comparison: true });
     }
   }
 
   resetSwarms() {
-    const seed = 42;
-    const N = 25;
-    const D = 2;
-
     const baseConfig = {
       fn: this.problem.fn,
       domain: this.problem.domain,
-      N,
-      D,
-      seed,
-      max_iter: 100
+      ...this.params,
+      D: this.problem.dimensions
     };
 
     this.engineA = new PSOEngine({
       ...baseConfig,
-      ...this.paramsA,
-      seed
+      topology: 'global'
     });
     this.engineB = new PSOEngine({
       ...baseConfig,
-      ...this.paramsB,
-      seed
+      topology: 'ring'
     });
 
     this.engineA.initialize();
@@ -127,7 +122,7 @@ export class CompareManager {
   }
 
   step() {
-    if (!this.engineA || !this.engineB) return;
+    if (!this.engineA || !this.engineB || this.engineA.isFinished() || this.engineB.isFinished()) return;
 
     this.engineA.fullIteration();
     this.engineB.fullIteration();
@@ -151,6 +146,10 @@ export class CompareManager {
 
     const statA = this.container.querySelector('#comp-stat-a');
     const statB = this.container.querySelector('#comp-stat-b');
+    for (const id of ['#btn-comp-step', '#btn-comp-run']) {
+      const button = this.container.querySelector(id);
+      if (button) button.disabled = this.engineA.isFinished() || this.engineB.isFinished();
+    }
 
     if (statA) {
       statA.innerHTML = `Best f: <strong>${gA.fitness.toFixed(4)}</strong> | Diversity: <strong>${mA.diversity.toFixed(3)}</strong>`;
@@ -174,6 +173,6 @@ export class CompareManager {
   }
 }
 
-export function initCompareMode(container, problem, paramsA, paramsB) {
-  return new CompareManager(container, problem, paramsA, paramsB);
+export function initCompareMode(container, problem, params) {
+  return new CompareManager(container, problem, params);
 }

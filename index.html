@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/tokens.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/workbench.css">
 </head>
 <body>
 
@@ -22,50 +23,45 @@
     <!-- ============ TOP BAR ============ -->
     <header class="topbar" role="banner">
       <div class="topbar__logo" aria-label="SwarmLab">
-        <!-- Logo icon placeholder -->
-        <span aria-hidden="true">🐝</span>
-        <span>SwarmLab</span>
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+            <ellipse cx="14" cy="14" rx="11.5" ry="6" transform="rotate(-32 14 14)" stroke="currentColor" stroke-width="1.2" />
+            <ellipse cx="14" cy="14" rx="11.5" ry="6" transform="rotate(32 14 14)" stroke="currentColor" stroke-width="1.2" opacity=".55" />
+            <circle cx="14" cy="14" r="2.1" fill="currentColor" />
+            <circle cx="22.5" cy="7.7" r="1.6" fill="currentColor" />
+          </svg>
+        </span>
+        <span class="brand-wordmark">
+          <span class="brand-name">SwarmLab</span>
+          <span class="brand-description">Particle Swarm Optimization</span>
+        </span>
       </div>
-
-      <span class="topbar__problem-name" id="topbar-problem-name">Sphere 2D</span>
 
       <!-- Mode tabs (desktop) -->
       <nav class="topbar__tabs tabs" role="tablist" aria-label="Application mode">
-        <button class="tab" role="tab" id="tab-learn" aria-selected="true" aria-controls="panel-learn">Learn</button>
-        <button class="tab" role="tab" id="tab-handcalc" aria-selected="false" aria-controls="panel-handcalc">Hand-Calc Lab</button>
-        <button class="tab" role="tab" id="tab-predict" aria-selected="false" aria-controls="panel-predict">Predict</button>
-        <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="panel-compare">Compare</button>
+        <button class="tab" role="tab" id="tab-learn" aria-selected="true" aria-controls="main-canvas">Learn</button>
+        <button class="tab" role="tab" id="tab-handcalc" aria-selected="false" aria-controls="btab-panel-formula">Hand-Calc Lab</button>
+        <button class="tab" role="tab" id="tab-predict" aria-selected="false">Predict</button>
+        <button class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="btab-panel-compare">Compare</button>
       </nav>
 
       <!-- Actions -->
       <div class="topbar__actions">
         <button class="btn btn--secondary btn--sm learn-trigger" id="btn-open-learn" type="button">Learn PSO</button>
-        <label class="toggle" title="Colour-blind safe mode">
-          <input type="checkbox" class="toggle__input" id="toggle-colorblind" aria-label="Toggle colour-blind safe mode">
-          <span class="toggle__track"><span class="toggle__thumb"></span></span>
-          <span class="toggle__label sr-only">Colour-blind mode</span>
+        <label class="toggle theme-switch" title="Switch light and dark theme (D)">
+          <input type="checkbox" class="toggle__input" id="btn-theme-toggle" role="switch">
+          <span class="toggle__track" aria-hidden="true"><span class="toggle__thumb"></span></span>
+          <span class="toggle__label">Dark mode</span>
         </label>
 
-        <button class="btn btn--icon" id="btn-theme-toggle" aria-label="Toggle dark mode" type="button">
-          <span aria-hidden="true">🌙</span>
-        </button>
-
         <button class="btn btn--icon" id="btn-help" aria-label="Help and keyboard shortcuts" type="button">
-          <span aria-hidden="true">?</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.6-2.5 2-2.5 4" stroke-linecap="round"/><circle cx="12" cy="16.5" r=".85" fill="currentColor" stroke="none"/></svg>
         </button>
       </div>
     </header>
 
     <!-- ============ WORKSPACE (3-zone layout) ============ -->
     <main class="workspace" id="workspace">
-
-      <!-- Drawer toggle buttons (tablet/mobile) -->
-      <button class="drawer-toggle drawer-toggle--left" id="btn-toggle-left" aria-label="Toggle left panel" type="button" aria-expanded="false">
-        <span aria-hidden="true">☰</span>
-      </button>
-      <button class="drawer-toggle drawer-toggle--right" id="btn-toggle-right" aria-label="Toggle right panel" type="button" aria-expanded="false">
-        <span aria-hidden="true">▶</span>
-      </button>
 
       <!-- Drawer backdrop -->
       <div class="drawer-backdrop" id="drawer-backdrop" aria-hidden="true"></div>
@@ -160,11 +156,11 @@
               Vmax (% of range)
               <span class="tooltip-wrapper">
                 <button class="tooltip-trigger" aria-label="Info about velocity clamping" type="button">ⓘ</button>
-                <span class="tooltip" role="tooltip">Maximum velocity as percentage of domain range.</span>
+                <span class="tooltip" role="tooltip">Maximum velocity as a percentage of the domain range. Set to 0 for no limit.</span>
               </span>
             </label>
-            <input type="range" class="range-input" id="param-vmax-slider" min="1" max="100" value="50">
-            <input type="number" class="num-input" id="param-vmax" min="1" max="100" value="50" aria-label="Vmax percentage">
+            <input type="range" class="range-input" id="param-vmax-slider" min="0" max="100" value="50">
+            <input type="number" class="num-input" id="param-vmax" min="0" max="100" value="50" aria-label="Vmax percentage">
           </div>
 
           <!-- Max iterations -->
@@ -177,7 +173,7 @@
           <div class="param-group">
             <label class="param-label" for="param-seed">Seed</label>
             <div class="form-row--inline">
-              <input type="number" class="num-input" id="param-seed" min="0" value="42" aria-label="Random seed">
+              <input type="number" class="num-input" id="param-seed" min="0" max="4294967295" value="42" aria-label="Random seed">
               <button class="btn btn--secondary btn--sm" id="btn-random-seed" type="button" aria-label="Random seed">🎲</button>
             </div>
           </div>
@@ -198,6 +194,7 @@
                   <option value="clamp">Clamp</option>
                   <option value="reflect">Reflect</option>
                   <option value="absorb">Absorb</option>
+                  <option value="none">None</option>
                 </select>
               </div>
 
@@ -224,7 +221,7 @@
                 <label class="param-label" for="param-inertia-schedule">Inertia Schedule</label>
                 <select class="num-input" id="param-inertia-schedule" aria-label="Inertia schedule">
                   <option value="constant">Constant</option>
-                  <option value="linear">Linear Decay</option>
+                  <option value="linear">Linear Decay (w to w/2)</option>
                 </select>
               </div>
 
@@ -258,17 +255,44 @@
       <!-- ===== CENTER PANEL ===== -->
       <div class="panel-center" id="panel-center">
 
+        <nav class="mobile-mode-tabs" role="tablist" aria-label="Application mode (mobile)">
+          <button class="tab" role="tab" aria-selected="true">Learn</button>
+          <button class="tab" role="tab" aria-selected="false">Hand-Calc</button>
+          <button class="tab" role="tab" aria-selected="false">Predict</button>
+          <button class="tab" role="tab" aria-selected="false">Compare</button>
+        </nav>
+
+        <div class="workspace-tools">
+          <button class="drawer-toggle drawer-toggle--left" id="btn-toggle-left" aria-controls="panel-left" type="button" aria-expanded="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-5 0v6"/></svg>
+            Experiment settings
+          </button>
+          <button class="drawer-toggle drawer-toggle--right" id="btn-toggle-right" aria-controls="panel-right" type="button" aria-expanded="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14v11H9l-4 3zM8 9h8m-8 3h5"/></svg>
+            Narrator
+          </button>
+        </div>
+
+        <section class="experiment-stage" aria-labelledby="topbar-problem-name">
+          <header class="stage-header">
+            <div class="stage-objective">
+              <span class="stage-kicker">Objective landscape</span>
+              <h1 id="topbar-problem-name">Sphere 2D</h1>
+            </div>
+            <div class="simulation-hud" aria-live="polite">
+              <span class="simulation-hud__eyebrow">Current phase</span>
+              <strong id="simulation-phase">Ready to explore</strong>
+              <span id="simulation-subtitle">Press play to see the swarm learn the landscape.</span>
+            </div>
+          </header>
+
         <!-- Main canvas -->
         <div class="canvas-container" id="main-canvas">
-          <div class="simulation-hud" aria-live="polite">
-            <span class="simulation-hud__eyebrow">LIVE EXPERIMENT</span>
-            <strong id="simulation-phase">Ready to explore</strong>
-            <span id="simulation-subtitle">Press play to see the swarm learn the landscape.</span>
-          </div>
           <canvas id="canvas-main" aria-label="PSO visualization canvas">
             Your browser does not support HTML5 Canvas.
           </canvas>
-          <!-- Force legend overlay -->
+        </div>
+          <!-- Force legend -->
           <div class="force-legend" id="force-legend" aria-label="Force vector legend">
             <span class="force-legend__item">
               <span class="force-legend__swatch" style="background:var(--c-force-inertia)"></span>
@@ -287,36 +311,45 @@
               Resultant
             </span>
           </div>
-        </div>
 
         <!-- Control bar -->
         <div class="control-bar" id="control-bar" role="toolbar" aria-label="Playback controls">
-          <span class="control-bar__label">Playback</span>
           <div class="transport">
-            <button class="transport__btn" id="btn-reset" aria-label="Reset" type="button">⏮</button>
-            <button class="transport__btn" id="btn-step-back" aria-label="Step back" type="button">⏪</button>
-            <button class="transport__btn transport__btn--play" id="btn-play" aria-label="Play / Pause" type="button">▶</button>
-            <button class="transport__btn" id="btn-step-forward" aria-label="Step forward" type="button">⏩</button>
-            <button class="transport__btn" id="btn-skip-end" aria-label="Skip to end" type="button">⏭</button>
+            <button class="transport__btn" id="btn-reset" aria-label="Reset" type="button">
+              <svg class="transport-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 1 1 2.4 6m-2.4-2v-5h5"/></svg>
+            </button>
+            <button class="transport__btn" id="btn-step-back" aria-label="Step back" type="button">
+              <svg class="transport-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12m11-12-8 6 8 6z"/></svg>
+            </button>
+            <button class="transport__btn transport__btn--play" id="btn-play" aria-label="Play" type="button">▶</button>
+            <button class="transport__btn transport__btn--step" id="btn-step-forward" aria-label="Step forward" type="button">
+              Step <svg class="transport-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 6 8 6-8 6zm11 0v12"/></svg>
+            </button>
+            <button class="transport__btn" id="btn-skip-end" aria-label="Next iteration" type="button">
+              <svg class="transport-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 6 7 6-7 6zm8 0 7 6-7 6z"/></svg>
+            </button>
           </div>
-          <span class="transport__speed" id="speed-label">1×</span>
-          <input type="range" class="range-input" id="speed-slider" min="0.25" max="10" step="0.25" value="1" aria-label="Playback speed">
-          <span class="scrubber-label" id="iteration-label">Iter: 0 / 100</span>
-          <div class="form-row--inline" style="margin-left:auto">
+          <div class="transport-settings">
+            <div class="transport-rate">
+              <input type="range" class="range-input" id="speed-slider" min="0.25" max="10" step="0.25" value="1" aria-label="Playback speed">
+              <span class="transport__speed" id="speed-label">1×</span>
+            </div>
             <label class="toggle">
-              <input type="checkbox" class="toggle__input" id="toggle-micro" aria-label="Toggle micro-step mode">
-              <span class="toggle__track"><span class="toggle__thumb"></span></span>
-              <span class="toggle__label">Micro</span>
+              <input type="checkbox" class="toggle__input" id="toggle-micro" role="switch">
+              <span class="toggle__track" aria-hidden="true"><span class="toggle__thumb"></span></span>
+              <span class="toggle__label">Micro-step</span>
             </label>
           </div>
         </div>
 
         <!-- Timeline / scrubber -->
         <div class="timeline" id="timeline" aria-label="Iteration timeline">
+          <span class="scrubber-label" id="iteration-label">Iter: 0 / 100</span>
           <span class="scrubber-label">0</span>
           <input type="range" class="scrubber" id="timeline-scrubber" min="0" max="100" value="0" aria-label="Timeline scrubber">
           <span class="scrubber-label" id="timeline-max">100</span>
         </div>
+        </section>
 
         <!-- Bottom tabs -->
         <div class="bottom-tabs" id="bottom-tabs">
@@ -372,13 +405,6 @@
           </div>
         </div>
 
-        <!-- Mobile mode tabs -->
-        <nav class="mobile-mode-tabs" role="tablist" aria-label="Application mode (mobile)">
-          <button class="tab" role="tab" aria-selected="true">Learn</button>
-          <button class="tab" role="tab" aria-selected="false">Hand-Calc</button>
-          <button class="tab" role="tab" aria-selected="false">Predict</button>
-          <button class="tab" role="tab" aria-selected="false">Compare</button>
-        </nav>
       </div>
 
       <!-- ===== RIGHT PANEL ===== -->
@@ -397,6 +423,17 @@
         <!-- Swarm Health -->
         <section class="panel-section" aria-labelledby="section-health-title">
           <h2 class="panel-section__title" id="section-health-title">Swarm Health</h2>
+
+          <div class="swarm-readout">
+            <div class="param-group">
+              <span class="param-label">Best fitness</span>
+              <span class="param-value" id="health-gbest-fitness">—</span>
+            </div>
+            <div class="param-group">
+              <span class="param-label">Global best position</span>
+              <span class="param-value" id="health-gbest">—</span>
+            </div>
+          </div>
 
           <div class="health-meter" id="health-diversity">
             <div class="health-meter__label">
@@ -428,14 +465,15 @@
             </div>
           </div>
 
-          <div class="param-group">
-            <span class="param-label">Global Best</span>
-            <span class="param-value" id="health-gbest">—</span>
-          </div>
-          <div class="param-group">
-            <span class="param-label">Best Fitness</span>
-            <span class="param-value" id="health-gbest-fitness">—</span>
-          </div>
+        </section>
+
+        <section class="panel-section display-options" aria-labelledby="section-display-title">
+          <h2 class="panel-section__title" id="section-display-title">Display</h2>
+          <label class="toggle palette-switch" title="Use a grayscale landscape and alternate force colours">
+            <input type="checkbox" class="toggle__input" id="toggle-colorblind" role="switch">
+            <span class="toggle__track" aria-hidden="true"><span class="toggle__thumb"></span></span>
+            <span class="toggle__label">Colour-blind palette</span>
+          </label>
         </section>
 
         <!-- Coach / Advisor -->
@@ -454,7 +492,7 @@
 
     <!-- ============ FOOTER ============ -->
     <footer class="app-footer" role="contentinfo">
-      <span>SwarmLab — Interactive PSO Teaching Tool</span>
+      <span>SwarmLab · Particle Swarm Optimization</span>
       <span id="verification-badge-area">
         <!-- Verification badge rendered by JS -->
       </span>
@@ -488,6 +526,7 @@
         </table>
       </div>
       <div class="modal__footer">
+        <button class="btn btn--secondary" id="btn-open-tour" type="button">Start guided tour</button>
         <button class="btn btn--primary" id="btn-help-close-footer" type="button">Got it</button>
       </div>
     </div>
@@ -528,7 +567,7 @@
 
 
   <!-- ============ GUIDED TOUR ============ -->
-  <div class="tour-overlay" id="tour-overlay" aria-label="Guided tour">
+  <div class="tour-overlay" id="tour-overlay" role="dialog" aria-modal="true" aria-label="Guided tour" aria-hidden="true">
     <div class="tour-backdrop"></div>
 
     <!-- Step 1 -->

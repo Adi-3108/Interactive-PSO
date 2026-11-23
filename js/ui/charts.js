@@ -90,14 +90,15 @@ export class ChartRenderer {
 
   _getThemeColors() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const colors = this.options.comparison ? getComputedStyle(document.documentElement) : null;
     return {
       bg: isDark ? '#161D28' : '#FFFFFF',
       text: isDark ? '#9AA7B8' : '#5B6778',
       textStrong: isDark ? '#E8EDF4' : '#1B2430',
       border: isDark ? '#263243' : '#E3E7EE',
       grid: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-      best: '#F5B301',    // gold
-      mean: '#2563EB',    // blue
+      best: colors?.getPropertyValue('--c-accent').trim() || '#F5B301',
+      mean: colors?.getPropertyValue('--c-warning').trim() || '#2563EB',
       worst: '#DC2626',   // red
       diversity: '#10B981', // emerald
       indicator: isDark ? '#FFFFFF' : '#111827'
@@ -263,16 +264,20 @@ export class ChartRenderer {
     };
 
     if (this.options.type === 'convergence') {
-      drawLine('worst', colors.worst, 1.5);
+      if (!this.options.comparison) drawLine('worst', colors.worst, 1.5);
       drawLine('mean', colors.mean, 2);
       drawLine('best', colors.best, 2.5);
 
       // Legend
-      this._drawLegend(ctx, [
+      const legend = this.options.comparison ? [
+        { label: 'A · Global', color: colors.best },
+        { label: 'B · Ring', color: colors.mean }
+      ] : [
         { label: 'Best f(g)', color: colors.best },
         { label: 'Mean', color: colors.mean },
         { label: 'Worst', color: colors.worst }
-      ], padding.left + 10, padding.top - 15);
+      ];
+      this._drawLegend(ctx, legend, padding.left + 10, padding.top - 15);
     } else {
       drawLine('diversity', colors.diversity, 2.5);
 

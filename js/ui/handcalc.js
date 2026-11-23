@@ -102,6 +102,7 @@ export class HandCalcLab {
     const btnLoad = this.container.querySelector('#btn-load-textbook');
     if (btnLoad) {
       btnLoad.addEventListener('click', () => {
+        this.setReferenceRandom();
         if (this.onLoadTextbook) this.onLoadTextbook();
         this.runAutoCheck();
       });
@@ -109,12 +110,7 @@ export class HandCalcLab {
 
     const btnPresetHalf = this.container.querySelector('#btn-hc-preset-half');
     if (btnPresetHalf) {
-      btnPresetHalf.addEventListener('click', () => {
-        const r1 = this.container.querySelector('#hc-r1');
-        const r2 = this.container.querySelector('#hc-r2');
-        if (r1) r1.value = '0.5';
-        if (r2) r2.value = '0.5';
-      });
+      btnPresetHalf.addEventListener('click', () => this.setReferenceRandom());
     }
 
     const btnCheck = this.container.querySelector('#btn-run-autocheck');
@@ -125,6 +121,11 @@ export class HandCalcLab {
     }
 
     this.renderWorksheet();
+  }
+
+  setReferenceRandom() {
+    this.container.querySelector('#hc-r1').value = TEXTBOOK_REFERENCE.params.r1;
+    this.container.querySelector('#hc-r2').value = TEXTBOOK_REFERENCE.params.r2;
   }
 
   getManualRandom() {

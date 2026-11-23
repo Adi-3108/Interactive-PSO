@@ -5,6 +5,8 @@
  * @module ui/predict
  */
 
+const ROUND_PROMPT = "Start a round to calculate a particle's next move, then make your prediction on the canvas or with the coordinate fields.";
+
 export class PredictMode {
   /**
    * @param {HTMLElement} container
@@ -27,6 +29,7 @@ export class PredictMode {
     this.difficulty = 'medium'; // 'easy' | 'medium' | 'hard'
 
     this.activePrediction = null; // {particleIndex, actualTarget: [x, y], userGuess: [x, y]}
+    this.dimensions = 2;
     this.showHints = false;
 
     this.initUI();
@@ -48,10 +51,10 @@ export class PredictMode {
             <div class="stat-badge" style="background:var(--c-surface-muted); padding:6px 12px; border-radius:6px; font-weight:600; font-size:13px;">
               🔥 Streak: <span id="predict-streak" style="color:var(--c-accent,#4F46E5);">0</span> (Best: <span id="predict-best">0</span>)
             </div>
-            <select class="num-input" id="predict-difficulty" style="width:110px;">
+            <select class="num-input" id="predict-difficulty" aria-label="Prediction difficulty" style="width:110px;">
               <option value="easy">Easy (Hints On)</option>
               <option value="medium" selected>Medium</option>
-              <option value="hard">Hard (Hidden r)</option>
+              <option value="hard">Hard (No hints)</option>
             </select>
           </div>
         </div>
@@ -59,7 +62,7 @@ export class PredictMode {
         <!-- Prediction Prompt Box -->
         <div class="predict-card" id="predict-card" style="background:var(--c-surface-raised); border:1px solid var(--c-border); border-radius:10px; padding:16px; margin-bottom:16px;">
           <div id="predict-prompt-text" style="font-size:14px; margin-bottom:12px;">
-            Start a round to calculate a particle's next move, then make your prediction on the canvas or with the coordinate fields.
+            ${ROUND_PROMPT}
           </div>
 
           <button class="btn btn--primary btn--sm" id="btn-start-prediction" type="button">Start prediction round</button>
@@ -81,6 +84,7 @@ export class PredictMode {
             </button>
           </div>
           <div id="predict-coordinate-feedback" class="predict-coordinate-feedback" role="status" aria-live="polite"></div>
+          <p id="predict-force-hint" class="text-muted" hidden></p>
 
           <!-- Result feedback -->
           <div id="predict-feedback" style="display:none; margin-top:14px; padding:10px; border-radius:6px; font-size:13px;">
@@ -94,7 +98,7 @@ export class PredictMode {
       diffSelect.addEventListener('change', (e) => {
         this.difficulty = e.target.value;
         this.showHints = this.difficulty === 'easy';
-        if (this.onHintToggle) this.onHintToggle(this.showHints);
+        this.renderHint();
       });
     }
 
@@ -102,8 +106,7 @@ export class PredictMode {
     if (hintBtn) {
       hintBtn.addEventListener('click', () => {
         this.showHints = !this.showHints;
-        hintBtn.textContent = this.showHints ? '💡 Hide Hint' : '💡 Hint (Force Arrows)';
-        if (this.onHintToggle) this.onHintToggle(this.showHints);
+        this.renderHint();
       });
     }
 
@@ -130,6 +133,34 @@ export class PredictMode {
     }
   }
 
+  resetRound(dimensions = this.dimensions) {
+    this.dimensions = dimensions;
+    this.activePrediction = null;
+    this.container.querySelector('#predict-y-group').hidden = dimensions === 1;
+    this.container.querySelector('#predict-y').disabled = dimensions === 1;
+    this.container.querySelector('#predict-prompt-text').textContent = ROUND_PROMPT;
+    this.container.querySelector('#predict-feedback').style.display = 'none';
+    this.container.querySelector('#predict-x').value = '';
+    this.container.querySelector('#predict-y').value = '';
+    this.updateCoordinateValidity();
+    this.renderHint();
+  }
+
+  renderHint() {
+    const button = this.container.querySelector('#btn-toggle-hint');
+    const hint = this.container.querySelector('#predict-force-hint');
+    button.disabled = this.difficulty === 'hard';
+    button.textContent = this.showHints ? 'Hide hint' : 'Show force hint';
+    button.setAttribute('aria-pressed', String(this.showHints));
+    const forces = this.activePrediction?.forces;
+    hint.hidden = !(this.showHints && forces);
+    if (!hint.hidden) {
+      const format = values => values.map(value => value.toFixed(3)).join(', ');
+      hint.textContent = `Inertia (${format(forces.inertia)}) · Personal pull (${format(forces.cognitive)}) · Social pull (${format(forces.social)})`;
+    }
+    this.onHintToggle?.(this.showHints && Boolean(this.activePrediction));
+  }
+
   updateCoordinateValidity(showFeedback = false) {
     const xInput = this.container.querySelector('#predict-x');
     const yInput = this.container.querySelector('#predict-y');
@@ -140,7 +171,8 @@ export class PredictMode {
     const gx = xRaw === '' ? NaN : Number(xRaw);
     const gy = yRaw === '' ? NaN : Number(yRaw);
     const xValid = Number.isFinite(gx);
-    const yValid = Number.isFinite(gy);
+    const yValid = this.dimensions === 1 || Number.isFinite(gy);
+    showFeedback = showFeedback && Boolean(this.activePrediction);
 
     if (xInput) xInput.setAttribute('aria-invalid', String(showFeedback && !xValid));
     if (yInput) yInput.setAttribute('aria-invalid', String(showFeedback && !yValid));
@@ -192,21 +224,18 @@ export class PredictMode {
     if (feedback) feedback.style.display = 'none';
     if (submitBtn) submitBtn.disabled = true;
     this.updateCoordinateValidity(false);
+    this.renderHint();
   }
 
   setCanvasClickGuess(coords) {
-    if (!this.activePrediction || !Array.isArray(coords) || coords.length < 2) return;
-    if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) {
-      this.updateCoordinateValidity(true);
-      return;
-    }
+    if (!this.activePrediction || coords.length !== this.dimensions || !coords.every(Number.isFinite)) return;
     const xInput = this.container.querySelector('#predict-x');
     const yInput = this.container.querySelector('#predict-y');
 
     if (xInput && coords[0] !== undefined) xInput.value = coords[0].toFixed(2);
     if (yInput && coords[1] !== undefined) yInput.value = coords[1].toFixed(2);
 
-    this.submitGuess([coords[0], coords[1] !== undefined ? coords[1] : 0]);
+    this.submitGuess(coords);
   }
 
   submitGuess(overrideCoords = null) {
@@ -214,14 +243,11 @@ export class PredictMode {
 
     let guess = overrideCoords;
     if (!guess) {
-      const xInput = this.container.querySelector('#predict-x');
-      const yInput = this.container.querySelector('#predict-y');
-      const gx = xInput && xInput.value.trim() !== '' ? Number(xInput.value) : NaN;
-      const gy = yInput && yInput.value.trim() !== '' ? Number(yInput.value) : NaN;
-      guess = [gx, gy];
+      if (!this.updateCoordinateValidity(true)) return null;
+      guess = [this.container.querySelector('#predict-x').valueAsNumber];
+      if (this.dimensions === 2) guess.push(this.container.querySelector('#predict-y').valueAsNumber);
     }
-    if (!Array.isArray(guess) || guess.length < 2 ||
-        !Number.isFinite(guess[0]) || !Number.isFinite(guess[1])) {
+    if (guess.length !== this.dimensions || !guess.every(Number.isFinite)) {
       this.updateCoordinateValidity(true);
       return null;
     }
@@ -231,7 +257,7 @@ export class PredictMode {
 
     let distSq = 0;
     for (let d = 0; d < D; d++) {
-      const diff = (guess[d] || 0) - target[d];
+      const diff = guess[d] - target[d];
       distSq += diff * diff;
     }
     const error = Math.sqrt(distSq);
@@ -270,7 +296,9 @@ export class PredictMode {
       `;
     }
 
-    if (this.onReveal) this.onReveal();
+    this.activePrediction = null;
+    this.renderHint();
+    this.onReveal?.();
 
     return { error, isGood, streak: this.streak };
   }

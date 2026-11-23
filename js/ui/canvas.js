@@ -64,6 +64,10 @@ function buildViridisReversed() {
 }
 
 const VIRIDIS_REVERSED = buildViridisReversed();
+const GRAYSCALE_HEATMAP = Array.from({ length: 256 }, (_, index) => {
+  const shade = 24 + Math.round((212 * index) / 255);
+  return [shade, shade, shade];
+});
 
 /** Force-decomposition arrow colours. */
 const FORCE_COLOURS = {
@@ -162,6 +166,7 @@ function clamp(v, lo, hi) {
 /**
  * @typedef {Object} RenderOptions
  * @property {string}  [displayMode='both']       - heatmap | contours | both | plain
+ * @property {boolean} [colorblind=false]         - use a grayscale heatmap
  * @property {boolean} [showLabels=true]           - show particle ID labels
  * @property {boolean} [showTrails=true]           - show trailing positions
  * @property {number}  [trailLength=20]            - number of past positions to show
@@ -235,6 +240,7 @@ export class CanvasRenderer {
     /** @type {RenderOptions} */
     this._options = {
       displayMode: DisplayMode.BOTH,
+      colorblind: false,
       showLabels: true,
       showTrails: true,
       trailLength: 20,
@@ -327,8 +333,8 @@ export class CanvasRenderer {
    */
   setOptions(options) {
     Object.assign(this._options, options);
-    // If display mode changed, need to re-render landscape
-    if ('displayMode' in options || 'contourLevels' in options || 'showContourLines' in options) {
+    const landscapeOptions = ['displayMode', 'contourLevels', 'showContourLines', 'colorblind'];
+    if (landscapeOptions.some(option => option in options)) {
       this._landscapeCache = null;
     }
     if (this._lastState) {
@@ -561,6 +567,7 @@ export class CanvasRenderer {
 
     const mode = this._options.displayMode;
     const showHeatmap = mode === DisplayMode.HEATMAP || mode === DisplayMode.BOTH;
+    const palette = this._options.colorblind ? GRAYSCALE_HEATMAP : VIRIDIS_REVERSED;
 
     for (let iy = 0; iy < resolutionY; iy++) {
       for (let ix = 0; ix < resolution; ix++) {
@@ -568,7 +575,7 @@ export class CanvasRenderer {
         if (showHeatmap) {
           const t = clamp((values[iy * resolution + ix] - fMin) / (fMax - fMin || 1), 0, 1);
           const ci = Math.round(t * 255);
-          const [r, g, b] = VIRIDIS_REVERSED[ci];
+          const [r, g, b] = palette[ci];
           data[idx] = r;
           data[idx + 1] = g;
           data[idx + 2] = b;
@@ -1153,6 +1160,9 @@ export class CanvasRenderer {
     const domH = this._domain[1][1] - this._domain[1][0];
 
     const scale = 0.4;
+    const inertiaColor = cssVar('--c-force-inertia', FORCE_COLOURS.inertia);
+    const cognitiveColor = cssVar('--c-force-cognitive', FORCE_COLOURS.cognitive);
+    const socialColor = cssVar('--c-force-social', FORCE_COLOURS.social);
 
     /**
      * Draw a force vector from origin.
@@ -1183,13 +1193,13 @@ export class CanvasRenderer {
 
     // Tip-to-tail: inertia → cognitive → social
     const { endX: ix, endY: iy } = drawForceVec(
-      fd.inertia, FORCE_COLOURS.inertia, 'inertia', cx, cy);
+      fd.inertia, inertiaColor, 'inertia', cx, cy);
     const { endX: cogX, endY: cogY } = drawForceVec(
-      fd.cognitive, FORCE_COLOURS.cognitive, 'cognitive', ix, iy);
-    drawForceVec(fd.social, FORCE_COLOURS.social, 'social', cogX, cogY);
+      fd.cognitive, cognitiveColor, 'cognitive', ix, iy);
+    drawForceVec(fd.social, socialColor, 'social', cogX, cogY);
 
     // Resultant from particle
-    const resultColour = dark ? FORCE_COLOURS.resultantDark : FORCE_COLOURS.resultantLight;
+    const resultColour = cssVar('--c-force-resultant', dark ? FORCE_COLOURS.resultantDark : FORCE_COLOURS.resultantLight);
     drawForceVec(fd.resultant, resultColour, 'resultant', cx, cy);
 
     // Small legend box
@@ -1206,9 +1216,9 @@ export class CanvasRenderer {
 
     ctx.font = '10px system-ui, sans-serif';
     const labels = [
-      { colour: FORCE_COLOURS.inertia, text: `Inertia: ${this._vecMag(fd.inertia).toFixed(3)}` },
-      { colour: FORCE_COLOURS.cognitive, text: `Cognitive: ${this._vecMag(fd.cognitive).toFixed(3)}` },
-      { colour: FORCE_COLOURS.social, text: `Social: ${this._vecMag(fd.social).toFixed(3)}` },
+      { colour: inertiaColor, text: `Inertia: ${this._vecMag(fd.inertia).toFixed(3)}` },
+      { colour: cognitiveColor, text: `Cognitive: ${this._vecMag(fd.cognitive).toFixed(3)}` },
+      { colour: socialColor, text: `Social: ${this._vecMag(fd.social).toFixed(3)}` },
       { colour: resultColour, text: `Resultant: ${this._vecMag(fd.resultant).toFixed(3)}` },
     ];
 
@@ -1394,12 +1404,13 @@ export class CanvasRenderer {
     const ly = pa.y;
     const lw = 16;
     const lh = pa.h;
+    const palette = this._options.colorblind ? GRAYSCALE_HEATMAP : VIRIDIS_REVERSED;
 
     // Draw gradient bar
     for (let i = 0; i < lh; i++) {
       const t = 1 - i / lh; // top = max, bottom = min
       const ci = Math.round(t * 255);
-      const [r, g, b] = VIRIDIS_REVERSED[ci];
+      const [r, g, b] = palette[ci];
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(lx, ly + i, lw, 1);
     }

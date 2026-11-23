@@ -21,6 +21,24 @@ import { PredictMode } from './predict.js';
 import { CompareManager } from './compare.js';
 import { runVerification } from '../tests/verify.js';
 
+const APP_MODES = ['learn', 'handcalc', 'predict', 'compare'];
+
+function readPreference(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function savePreference(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Preferences can still be used for this visit when storage is blocked.
+  }
+}
+
 class SwarmLabApp {
   constructor() {
     this.currentMode = 'learn'; // 'learn' | 'handcalc' | 'predict' | 'compare'
@@ -64,10 +82,14 @@ class SwarmLabApp {
   }
 
   init() {
+    // Apply the saved theme before the canvas caches any colors.
+    this.setupTheme();
+
     // 1. Initialize Canvas & Visualizer
     const mainCanvas = document.getElementById('canvas-main');
     if (mainCanvas) {
       this.canvasRenderer = new CanvasRenderer(mainCanvas);
+      this.canvasRenderer.setOptions({ colorblind: document.documentElement.dataset.colorblind === 'true' });
       this.canvasRenderer.setFunction(this.currentProblem.fn, this.currentProblem.domain, this.currentProblem.dimensions);
 
       // Canvas click event (used for predict mode)
@@ -117,11 +139,9 @@ class SwarmLabApp {
       onReset: () => this.resetRun(),
       onSpeedChange: (s) => { this.speed = s; },
       onScrub: (step) => this.jumpToStep(step),
-      onParamsChange: (newParams) => {
-        this.params = { ...this.params, ...newParams };
-        this.resetRun();
-        this.updateURLHash();
-      }
+      onParamsChange: (newParams, resume) => this.applyParameterChange(newParams, resume),
+      canContinueWith: (newParams) => this.canContinueWith(newParams),
+      onCancelParamsChange: () => this.controls.setParameters(this.params)
     });
     // Keep the visible controls in sync with the configuration that creates
     // the engine; the HTML values are only no-JavaScript fallbacks.
@@ -139,13 +159,13 @@ class SwarmLabApp {
     // 6. Initialize State Table & Toolbar
     const tableContainer = document.getElementById('btab-panel-table');
     initTable(tableContainer, () => this.history.getAll());
+    tableContainer?.addEventListener('table-precision-change', () => this.renderStateTable());
 
     // 7. Setup Special Mode Containers
     this.setupModes();
 
-    // 8. Setup Modals, Theme, Tour, and Footer Verification
+    // 8. Setup Modals, Tour, and Footer Verification
     this.setupModals();
-    this.setupTheme();
     this.setupTour();
     this.setupLearnDrawer();
     this.setupFooterVerification();
@@ -154,6 +174,7 @@ class SwarmLabApp {
     // 9. Parse URL Hash & Initialize Simulation
     this.parseURLHash();
     this.resetRun();
+    if (this.currentMode !== 'learn') this.switchMode(this.currentMode, false);
 
     // 10. Start Animation Loop
     this.startLoop();
@@ -161,29 +182,65 @@ class SwarmLabApp {
 
   // ─── Simulation Lifecycle ──────────────────────────────────────────────────
 
+  createEngine() {
+    return new PSOEngine({
+      ...this.params,
+      fn: this.currentProblem.fn,
+      domain: this.currentProblem.domain,
+      D: this.currentProblem.dimensions
+    });
+  }
+
+  canContinueWith(params) {
+    return Boolean(this.engine && !this.engine.isFinished() &&
+      params.N === this.params.N && params.seed === this.params.seed &&
+      params.max_iter > this.engine.getState().iteration);
+  }
+
+  applyParameterChange(newParams, resume = false) {
+    const canResume = resume && this.canContinueWith(newParams);
+    const current = canResume ? this.history.current() : null;
+    this.params = { ...this.params, ...newParams };
+    if (!current) {
+      this.resetRun();
+      return;
+    }
+
+    const narrationParams = current.narrationParams ?? current.params;
+    this.engine = this.createEngine();
+    this.engine.setState(current);
+    this.history.replaceCurrent({ ...current, params: this.params, narrationParams });
+    this.chartHistory.length = Math.min(this.chartHistory.length, current.iteration + 1);
+    this.compareManager?.setExperiment(this.currentProblem, this.params);
+    this.resetPrediction();
+    this.renderCurrentState(current.stepResult, narrationParams, false);
+    this.updateURLHash();
+    this.lastFrameTime = 0;
+    this.togglePlay(true);
+  }
+
+  resetPrediction() {
+    this.activeParticleId = null;
+    this.predictMode?.resetRound(this.currentProblem.dimensions);
+    this.canvasRenderer?.setOptions({ selectedParticle: null, showForces: false });
+  }
+
   resetRun() {
     this.isPlaying = false;
     if (this.controls) this.controls.setPlayState(false);
+    if (this.controls?.parameterToast) this.controls.setParameters(this.params);
+    this.controls?.clearParameterDecision();
     this.history.clear();
     this.chartHistory = [];
-    this.activeParticleId = null;
-
-    const fn = this.currentProblem.fn;
-    const domain = this.currentProblem.domain;
-    const D = this.currentProblem.dimensions;
-
-    this.engine = new PSOEngine({
-      fn,
-      domain,
-      D,
-      ...this.params
-    });
-
+    this.resetPrediction();
+    this.engine = this.createEngine();
     this.engine.initialize();
+    this.compareManager?.setExperiment(this.currentProblem, this.params);
 
     // Initial state snapshot
     const state = this.engine.getState();
-    this.history.push(state);
+    const stepResult = { type: 'init', iteration: 0, details: {} };
+    this.history.push({ ...state, stepResult, params: this.params });
 
     const metrics = this.engine.getMetrics();
     const gbest = this.engine.getGBest();
@@ -196,7 +253,7 @@ class SwarmLabApp {
     });
 
     if (this.coach) this.coach.reset();
-    this.renderCurrentState({ type: 'init', iteration: 0, details: {} });
+    this.renderCurrentState(stepResult);
     this.updateURLHash();
   }
 
@@ -207,12 +264,16 @@ class SwarmLabApp {
       return;
     }
 
+    if (this.history.canForward()) {
+      this.restoreSnapshot(this.history.forward());
+      return;
+    }
+
     const stepResult = this.engine.microStep();
     const state = this.engine.getState();
-    this.history.push(state);
+    this.history.push({ ...state, stepResult, params: this.params });
 
     // Update charts if iteration ended
-    const particles = this.engine.getParticles();
     const gbest = this.engine.getGBest();
     const metrics = this.engine.getMetrics();
 
@@ -226,20 +287,21 @@ class SwarmLabApp {
       };
     }
 
-    this.renderCurrentState(stepResult);
+    this.presentStep(stepResult);
+  }
 
-    // In Predict mode: pause before move
-    if (this.currentMode === 'predict' && stepResult.type === 'compute_velocity') {
-      if (this.isPlaying) {
-        this.togglePlay(false);
-      }
-      if (this.predictMode) {
-        const p = particles[0];
-        const nextTarget = [p.x[0] + p.v[0], (p.x[1] || 0) + (p.v[1] || 0)];
-        const forces = this.engine.getForceDecomposition(p.id);
-        this.predictMode.preparePrediction(p, nextTarget, forces);
-      }
+  presentStep(stepResult, narrationParams = this.params, trackCoach = true) {
+    if (this.currentMode === 'predict' && this.predictMode && stepResult?.type === 'compute_velocity') {
+      if (this.isPlaying) this.togglePlay(false);
+      const particle = this.engine.getParticles()[0];
+      this.activeParticleId = particle.id;
+      this.canvasRenderer?.setOptions({ selectedParticle: particle.id });
+      this.predictMode.preparePrediction(particle, this.engine.getLandingPosition(particle.id),
+        this.engine.getForceDecomposition(particle.id));
+    } else if (this.predictMode?.activePrediction) {
+      this.resetPrediction();
     }
+    this.renderCurrentState(stepResult, narrationParams, trackCoach);
   }
 
   stepIteration() {
@@ -260,9 +322,8 @@ class SwarmLabApp {
     this.isPlaying = false;
     if (this.controls) this.controls.setPlayState(false);
 
-    const prevSnapshot = this.history.back();
-    this.engine.setState(prevSnapshot);
-    this.renderCurrentState({ type: 'step_back', iteration: prevSnapshot.iteration, details: {} });
+    this.resetPrediction();
+    this.restoreSnapshot(this.history.back());
   }
 
   jumpToStep(stepIndex) {
@@ -270,9 +331,25 @@ class SwarmLabApp {
     if (snap) {
       this.isPlaying = false;
       if (this.controls) this.controls.setPlayState(false);
-      this.engine.setState(snap);
-      this.renderCurrentState({ type: 'scrub', iteration: snap.iteration, details: {} });
+      this.resetPrediction();
+      this.restoreSnapshot(snap);
     }
+  }
+
+  restoreSnapshot(snapshot) {
+    const hadPendingChange = Boolean(this.controls?.parameterToast);
+    this.controls?.clearParameterDecision();
+    if (JSON.stringify(this.params) !== JSON.stringify(snapshot.params)) {
+      this.params = snapshot.params;
+      this.engine = this.createEngine();
+      this.compareManager?.setExperiment(this.currentProblem, this.params);
+      this.controls?.setParameters(this.params);
+      this.updateURLHash();
+    } else if (hadPendingChange) {
+      this.controls.setParameters(this.params);
+    }
+    this.engine.setState(snapshot);
+    this.presentStep(snapshot.stepResult, snapshot.narrationParams ?? this.params, false);
   }
 
   jumpToIteration(iter) {
@@ -296,7 +373,15 @@ class SwarmLabApp {
 
   // ─── Rendering & Presentation ─────────────────────────────────────────────
 
-  renderCurrentState(stepResult = null) {
+  renderStateTable() {
+    const tbody = document.getElementById('particle-table-body');
+    if (tbody && this.engine) {
+      renderTable(tbody, this.engine.getParticles(), this.engine.getGBest(),
+        { activeParticleId: this.activeParticleId });
+    }
+  }
+
+  renderCurrentState(stepResult = null, narrationParams = this.params, trackCoach = true) {
     if (!this.engine) return;
 
     const state = this.engine.getState();
@@ -332,10 +417,7 @@ class SwarmLabApp {
     }
 
     // 2. State Table Render
-    const tbody = document.getElementById('particle-table-body');
-    if (tbody) {
-      renderTable(tbody, particles, gbest, { activeParticleId: this.activeParticleId });
-    }
+    this.renderStateTable();
 
     // 3. Charts Render
     if (this.convergenceChart) {
@@ -354,7 +436,7 @@ class SwarmLabApp {
           mathView: `<strong>Starting recipe</strong><br>Inertia <code>w = ${this.params.w}</code> · Cognitive <code>c₁ = ${this.params.c1}</code> · Social <code>c₂ = ${this.params.c2}</code>`,
           glossaryTerms: []
         }
-        : generateNarration(stepResult, this.params);
+        : generateNarration({ ...stepResult, iteration: state.iteration }, narrationParams);
       renderNarrator(narratorEl, nar);
 
       const formulaDisplay = document.getElementById('formula-display');
@@ -367,7 +449,7 @@ class SwarmLabApp {
     }
 
     // 5. Coach Update
-    if (this.coach) {
+    if (trackCoach && this.coach) {
       this.coach.update(
         metrics,
         gbest,
@@ -428,31 +510,14 @@ class SwarmLabApp {
   // ─── Mode Switching ────────────────────────────────────────────────────────
 
   setupModes() {
-    const tabs = [
-      { id: 'tab-learn', mode: 'learn' },
-      { id: 'tab-handcalc', mode: 'handcalc' },
-      { id: 'tab-predict', mode: 'predict' },
-      { id: 'tab-compare', mode: 'compare' }
-    ];
-
-    tabs.forEach(({ id, mode }) => {
-      const btn = document.getElementById(id);
-      if (btn) {
-        btn.addEventListener('click', () => {
-          this.switchMode(mode);
-        });
-      }
+    APP_MODES.forEach(mode => {
+      document.getElementById(`tab-${mode}`)?.addEventListener('click', () => this.switchMode(mode));
     });
 
     // Mobile tabs
     const mobileTabs = document.querySelectorAll('.mobile-mode-tabs .tab');
     mobileTabs.forEach((tab, idx) => {
-      const mode = ['learn', 'handcalc', 'predict', 'compare'][idx];
-      tab.addEventListener('click', () => {
-        mobileTabs.forEach(t => t.setAttribute('aria-selected', 'false'));
-        tab.setAttribute('aria-selected', 'true');
-        this.switchMode(mode);
-      });
+      tab.addEventListener('click', () => this.switchMode(APP_MODES[idx]));
     });
 
     // Bottom Data Tabs: the learner sees only the three primary views.
@@ -504,21 +569,23 @@ class SwarmLabApp {
     }
   }
 
-  switchMode(mode) {
+  switchMode(mode, announce = true) {
     this.currentMode = mode;
 
-    // Update topbar tab styles
-    ['tab-learn', 'tab-handcalc', 'tab-predict', 'tab-compare'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.setAttribute('aria-selected', id === `tab-${mode}` ? 'true' : 'false');
+    const mobileTabs = document.querySelectorAll('.mobile-mode-tabs .tab');
+    APP_MODES.forEach((tabMode, idx) => {
+      const selected = String(tabMode === mode);
+      document.getElementById(`tab-${tabMode}`)?.setAttribute('aria-selected', selected);
+      mobileTabs[idx]?.setAttribute('aria-selected', selected);
     });
+    if (this.predictMode) this.predictMode.container.hidden = mode !== 'predict';
+    if (mode !== 'predict' && this.predictMode) this.resetPrediction();
 
     // Switch view logic
     const workspace = document.getElementById('workspace');
     if (!workspace) return;
 
     if (mode === 'handcalc') {
-      const btabComp = document.getElementById('btab-compare');
       const btabTable = document.getElementById('btab-table');
       if (btabTable) btabTable.click();
 
@@ -536,14 +603,17 @@ class SwarmLabApp {
         const ftab = document.getElementById('btab-formula');
         if (ftab) ftab.click();
       }
-      showToast('Switched to Hand-Calc Lab. Check formulas and textbook values.', 'info');
+      if (announce) showToast('Switched to Hand-Calc Lab. Check formulas and textbook values.', 'info');
     } else if (mode === 'predict') {
+      document.getElementById('btab-table')?.click();
       if (!this.predictMode) {
-        const rightPanel = document.getElementById('panel-right');
-        if (rightPanel) {
+        const playbackControls = document.getElementById('control-bar');
+        if (playbackControls) {
           const predictBox = document.createElement('div');
           predictBox.id = 'predict-mode-container';
-          rightPanel.insertBefore(predictBox, rightPanel.firstChild);
+          playbackControls.before(predictBox);
+          document.getElementById('tab-predict')?.setAttribute('aria-controls', predictBox.id);
+          mobileTabs[APP_MODES.indexOf('predict')]?.setAttribute('aria-controls', predictBox.id);
           this.predictMode = new PredictMode(
             predictBox,
             this.canvasRenderer,
@@ -560,25 +630,23 @@ class SwarmLabApp {
               if (this.engine && this.engine.getState().micro_step === 1) this.stepMicro();
             }
           );
+          this.predictMode.resetRound(this.currentProblem.dimensions);
         }
       }
-      showToast('Predict-then-Reveal active! Step forward to guess where particles land.', 'info');
+      if (announce) showToast('Predict-then-Reveal active! Step forward to guess where particles land.', 'info');
     } else if (mode === 'compare') {
       const compPanel = document.getElementById('btab-panel-compare');
       const compTab = document.getElementById('btab-compare');
       if (compTab) compTab.click();
       if (compPanel && !this.compareManager) {
-        this.compareManager = new CompareManager(compPanel, this.currentProblem, this.params, {
-          ...this.params,
-          topology: 'ring'
-        });
+        this.compareManager = new CompareManager(compPanel, this.currentProblem, this.params);
       }
-      showToast('Compare mode: Swarm A (Global) vs Swarm B (Ring).', 'info');
+      if (announce) showToast('Compare mode: Swarm A (Global) vs Swarm B (Ring).', 'info');
     } else {
       // Learn mode
       const btabTable = document.getElementById('btab-table');
       if (btabTable) btabTable.click();
-      showToast('Switched to Learn mode.', 'info');
+      if (announce) showToast('Switched to Learn mode.', 'info');
     }
 
     this.updateURLHash();
@@ -591,7 +659,9 @@ class SwarmLabApp {
     // can be rendered or optimized.
     if (problem.isCustom) {
       try {
-        problem = { ...problem, fn: parseExpression(problem.expression) };
+        const evaluate = parseExpression(problem.expression);
+        const yOnly = problem.variables?.length === 1 && problem.variables[0] === 'y';
+        problem = { ...problem, fn: yOnly ? (coordinate) => evaluate(0, coordinate) : evaluate };
       } catch (error) {
         showToast(`Could not load custom function: ${error.message}`, 'danger');
         return;
@@ -687,7 +757,7 @@ class SwarmLabApp {
       if (query.get('seed')) this.params.seed = parseInt(query.get('seed'), 10);
 
       const mode = query.get('mode');
-      if (mode && ['learn', 'handcalc', 'predict', 'compare'].includes(mode)) {
+      if (APP_MODES.includes(mode)) {
         this.currentMode = mode;
       }
 
@@ -700,36 +770,32 @@ class SwarmLabApp {
   // ─── Setup Modals, Theme & Accessibility ──────────────────────────────────
 
   setupTheme() {
-    const themeBtn = document.getElementById('btn-theme-toggle');
-    const savedTheme = localStorage.getItem('swarmlab_theme') || 'light';
-    document.documentElement.setAttribute('data-theme', savedTheme);
+    const root = document.documentElement;
+    const themeToggle = document.getElementById('btn-theme-toggle');
+    const isDark = readPreference('swarmlab_theme') === 'dark';
+    root.dataset.theme = isDark ? 'dark' : 'light';
+    if (themeToggle) themeToggle.checked = isDark;
+    themeToggle?.addEventListener('change', () => {
+      const next = themeToggle.checked ? 'dark' : 'light';
+      root.dataset.theme = next;
+      savePreference('swarmlab_theme', next);
 
-    if (themeBtn) {
-      themeBtn.innerHTML = savedTheme === 'dark' ? '☀️' : '🌙';
-      themeBtn.addEventListener('click', () => {
-        const current = document.documentElement.getAttribute('data-theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('swarmlab_theme', next);
-        themeBtn.innerHTML = next === 'dark' ? '☀️' : '🌙';
-
-        // Unlike DOM controls and charts, the landscape canvas keeps a theme
-        // dependent image cache. Redraw it on every theme change.
-        if (this.canvasRenderer) {
-          this.canvasRenderer.refreshTheme();
-        }
-        if (this.convergenceChart) this.convergenceChart.render();
-        if (this.diversityChart) this.diversityChart.render();
-      });
-    }
+      this.canvasRenderer?.refreshTheme();
+      this.convergenceChart?.render();
+      this.diversityChart?.render();
+      this.compareManager?.chart?.render();
+    });
 
     const colorblindToggle = document.getElementById('toggle-colorblind');
+    const useColorblindPalette = readPreference('swarmlab_colorblind') === 'true';
+    root.dataset.colorblind = String(useColorblindPalette);
     if (colorblindToggle) {
-      colorblindToggle.addEventListener('change', (e) => {
-        document.documentElement.setAttribute('data-colorblind', String(e.target.checked));
-        if (this.canvasRenderer) {
-          this.canvasRenderer.setOptions({ colorblind: e.target.checked });
-        }
+      colorblindToggle.checked = useColorblindPalette;
+      colorblindToggle.addEventListener('change', () => {
+        const enabled = colorblindToggle.checked;
+        root.dataset.colorblind = String(enabled);
+        savePreference('swarmlab_colorblind', String(enabled));
+        this.canvasRenderer?.setOptions({ colorblind: enabled });
       });
     }
   }
@@ -763,70 +829,86 @@ class SwarmLabApp {
     const panelRight = document.getElementById('panel-right');
     const backdrop = document.getElementById('drawer-backdrop');
 
-    if (btnLeft && panelLeft && backdrop) {
-      btnLeft.addEventListener('click', () => {
-        panelLeft.classList.toggle('is-open');
-        backdrop.classList.toggle('is-visible');
+    const drawers = [
+      { button: btnLeft, panel: panelLeft },
+      { button: btnRight, panel: panelRight }
+    ];
+    const setOpenDrawer = (openDrawer) => {
+      for (const drawer of drawers) {
+        const open = drawer === openDrawer;
+        drawer.panel?.classList.toggle('is-open', open);
+        drawer.button?.setAttribute('aria-expanded', String(open));
+      }
+      backdrop?.classList.toggle('is-visible', Boolean(openDrawer));
+    };
+    for (const drawer of drawers) {
+      drawer.button?.addEventListener('click', () => {
+        setOpenDrawer(drawer.panel?.classList.contains('is-open') ? null : drawer);
       });
     }
-    if (btnRight && panelRight && backdrop) {
-      btnRight.addEventListener('click', () => {
-        panelRight.classList.toggle('is-open');
-        backdrop.classList.toggle('is-visible');
-      });
-    }
-    if (backdrop) {
-      backdrop.addEventListener('click', () => {
-        if (panelLeft) panelLeft.classList.remove('is-open');
-        if (panelRight) panelRight.classList.remove('is-open');
-        backdrop.classList.remove('is-visible');
-      });
-    }
+    const closeDrawer = () => {
+      const openDrawer = drawers.find(drawer => drawer.panel?.classList.contains('is-open'));
+      setOpenDrawer(null);
+      openDrawer?.button?.focus();
+    };
+    backdrop?.addEventListener('click', closeDrawer);
+    window.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && backdrop?.classList.contains('is-visible')) closeDrawer();
+    });
+    window.matchMedia('(min-width: 1200px)').addEventListener('change', event => {
+      if (event.matches) setOpenDrawer(null);
+    });
   }
 
   setupTour() {
     const tourOverlay = document.getElementById('tour-overlay');
     if (!tourOverlay) return;
 
-    const tourDone = localStorage.getItem('swarmlab_tour_done');
-    if (tourDone === 'true') {
-      tourOverlay.style.display = 'none';
-      return;
-    }
+    const app = document.getElementById('app');
+    const help = document.getElementById('modal-help');
+    const helpButton = document.getElementById('btn-help');
+    let returnFocus = null;
 
-    let currentStep = 1;
     const showStep = (step) => {
-      document.querySelectorAll('.tour-step').forEach(s => s.classList.remove('is-current'));
+      tourOverlay.querySelectorAll('.tour-step').forEach(s => s.classList.remove('is-current'));
       const active = document.getElementById(`tour-step-${step}`);
-      if (active) active.classList.add('is-current');
-      currentStep = step;
+      active?.classList.add('is-current');
+      const title = active?.querySelector('.tour-step__title');
+      if (title) {
+        title.tabIndex = -1;
+        title.focus();
+      }
     };
 
-    document.querySelectorAll('[data-tour-next]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const next = parseInt(btn.getAttribute('data-tour-next'), 10);
-        showStep(next);
-      });
-    });
+    const openTour = () => {
+      returnFocus = help?.classList.contains('is-open') ? helpButton : document.activeElement;
+      help?.classList.remove('is-open');
+      if (app) app.inert = true;
+      tourOverlay.setAttribute('aria-hidden', 'false');
+      tourOverlay.classList.add('is-active');
+      showStep(1);
+    };
 
-    document.querySelectorAll('[data-tour-prev]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const prev = parseInt(btn.getAttribute('data-tour-prev'), 10);
-        showStep(prev);
-      });
+    tourOverlay.querySelectorAll('[data-tour-next], [data-tour-prev]').forEach(btn => {
+      btn.addEventListener('click', () => showStep(Number(btn.dataset.tourNext ?? btn.dataset.tourPrev)));
     });
 
     const finishTour = () => {
-      tourOverlay.style.display = 'none';
-      localStorage.setItem('swarmlab_tour_done', 'true');
+      tourOverlay.classList.remove('is-active');
+      if (app) app.inert = false;
+      if (returnFocus && returnFocus !== document.body) returnFocus.focus();
+      else helpButton?.focus();
+      tourOverlay.setAttribute('aria-hidden', 'true');
+      savePreference('swarmlab_tour_done', 'true');
     };
 
-    const skipBtn = document.getElementById('tour-skip');
-    const finishBtn = document.getElementById('tour-finish');
-    if (skipBtn) skipBtn.addEventListener('click', finishTour);
-    if (finishBtn) finishBtn.addEventListener('click', finishTour);
-
-    showStep(1);
+    document.getElementById('btn-open-tour')?.addEventListener('click', openTour);
+    document.getElementById('tour-skip')?.addEventListener('click', finishTour);
+    document.getElementById('tour-finish')?.addEventListener('click', finishTour);
+    tourOverlay.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') finishTour();
+    });
+    if (readPreference('swarmlab_tour_done') !== 'true' && !window.location.hash) openTour();
   }
 
   setupLearnDrawer() {

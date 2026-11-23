@@ -140,7 +140,7 @@ export const PRESETS = [
  * @param {number} [duration=4000]
  * @param {Array<{label: string, onClick: Function}>} [actions]
  */
-export function showToast(message, type = 'info', duration = 4000, actions = []) {
+export function showToast(message, type = 'info', duration = 4000, actions = [], onDismiss = null) {
   const container = document.getElementById('toast-container');
   if (!container) return;
 
@@ -162,7 +162,10 @@ export function showToast(message, type = 'info', duration = 4000, actions = [])
   `;
 
   const closeBtn = toast.querySelector('.toast__close');
-  closeBtn.addEventListener('click', () => toast.remove());
+  closeBtn.addEventListener('click', () => {
+    toast.remove();
+    onDismiss?.();
+  });
 
   if (actions && actions.length > 0) {
     const actionsBox = toast.querySelector('.toast__actions');
@@ -185,6 +188,7 @@ export function showToast(message, type = 'info', duration = 4000, actions = [])
       if (toast.isConnected) toast.remove();
     }, duration);
   }
+  return toast;
 }
 
 /**
@@ -201,6 +205,8 @@ export class ControlsController {
       onSpeedChange: () => {},
       onScrub: () => {},
       onParamsChange: () => {},
+      canContinueWith: () => false,
+      onCancelParamsChange: () => {},
       onProblemSelect: () => {},
       ...callbacks
     };
@@ -208,6 +214,7 @@ export class ControlsController {
     this.isPlaying = false;
     this.speed = 1.0;
     this.microStepMode = true;
+    this.parameterToast = null;
 
     this._bindTransport();
     this._bindParameters();
@@ -236,6 +243,10 @@ export class ControlsController {
 
     if (btnPlay) {
       btnPlay.addEventListener('click', () => {
+        if (this.parameterToast) {
+          this.parameterToast.querySelector('.toast__actions button')?.focus();
+          return;
+        }
         this.isPlaying = !this.isPlaying;
         btnPlay.textContent = this.isPlaying ? '⏸' : '▶';
         btnPlay.setAttribute('aria-label', this.isPlaying ? 'Pause' : 'Play');
@@ -322,7 +333,7 @@ export class ControlsController {
   }
 
   _bindParameters() {
-    const bindSync = (sliderId, inputId, parseFn) => {
+    const bindSync = (sliderId, inputId) => {
       const slider = document.getElementById(sliderId);
       const input = document.getElementById(inputId);
       if (!slider || !input) return;
@@ -335,6 +346,7 @@ export class ControlsController {
         slider.value = input.value;
         this._onParamInput();
       });
+      input.addEventListener('change', () => this.setParameters(this.getParameters()));
     };
 
     bindSync('param-n-slider', 'param-n');
@@ -356,7 +368,10 @@ export class ControlsController {
     others.forEach((id) => {
       const el = document.getElementById(id);
       if (el) {
-        el.addEventListener('change', () => this._onParamInput());
+        el.addEventListener('change', () => {
+          this._onParamInput();
+          this.setParameters(this.getParameters());
+        });
       }
     });
 
@@ -367,7 +382,6 @@ export class ControlsController {
         if (seedInput) {
           seedInput.value = Math.floor(Math.random() * 999999);
           this._onParamInput();
-          this.callbacks.onReset();
         }
       });
     }
@@ -395,22 +409,34 @@ export class ControlsController {
     const p = this.getParameters();
     this._validateParameters(p);
 
-    if (this.isPlaying) {
+    if (this.isPlaying || this.parameterToast) {
       this.setPlayState(false);
       this.callbacks.onPlayPause(false);
+      this.clearParameterDecision();
 
-      showToast(
-        'Parameters changed while running. Reset to start afresh, or Continue with new values.',
-        'warning',
-        0,
-        [
-          { label: 'Reset from Start', onClick: () => this.callbacks.onReset() },
-          { label: 'Continue Run', onClick: () => this.callbacks.onParamsChange(p) }
-        ]
-      );
+      const canContinue = this.callbacks.canContinueWith(p);
+      const apply = (resume) => {
+        this.clearParameterDecision();
+        this.callbacks.onParamsChange(p, resume);
+      };
+      const actions = [{ label: 'Reset from Start', onClick: () => apply(false) }];
+      if (canContinue) actions.push({ label: 'Continue Run', onClick: () => apply(true) });
+      this.parameterToast = showToast(
+        canContinue
+          ? 'Parameters changed. Restart with the new settings or continue from the current swarm.'
+          : 'This change requires a fresh run. Restart to apply the new settings.',
+        'warning', 0, actions, () => {
+          this.clearParameterDecision();
+          this.callbacks.onCancelParamsChange();
+        });
     } else {
       this.callbacks.onParamsChange(p);
     }
+  }
+
+  clearParameterDecision() {
+    this.parameterToast?.remove();
+    this.parameterToast = null;
   }
 
   _validateParameters(p) {
@@ -438,7 +464,8 @@ export class ControlsController {
   _bindKeyboard() {
     window.addEventListener('keydown', (e) => {
       // Don't trigger shortcuts when typing in an input
-      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) ||
+          document.querySelector('#tour-overlay.is-active')) return;
 
       switch (e.code) {
         case 'Space':
@@ -490,9 +517,9 @@ export class ControlsController {
   }
 
   getParameters() {
-    const num = (id, fallback) => {
-      const el = document.getElementById(id);
-      return el ? parseFloat(el.value) || fallback : fallback;
+    const num = (id, fallback, min, max) => {
+      const value = document.getElementById(id)?.valueAsNumber;
+      return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
     };
     const val = (id, fallback) => {
       const el = document.getElementById(id);
@@ -504,19 +531,18 @@ export class ControlsController {
     };
 
     return {
-      N: Math.max(2, Math.min(100, Math.round(num('param-n', 30)))),
-      w: num('param-w', 0.729),
-      c1: num('param-c1', 1.494),
-      c2: num('param-c2', 1.494),
-      vmax_pct: num('param-vmax', 20) / 100,
-      max_iter: Math.max(1, Math.round(num('param-maxiter', 100))),
-      seed: Math.round(num('param-seed', 42)),
+      N: Math.round(num('param-n', 25, 1, 100)),
+      w: num('param-w', 0.729, 0, 1.5),
+      c1: num('param-c1', 1.494, 0, 4),
+      c2: num('param-c2', 1.494, 0, 4),
+      vmax_pct: num('param-vmax', 20, 0, 100) / 100,
+      max_iter: Math.round(num('param-maxiter', 100, 1, 10000)),
+      seed: Math.round(num('param-seed', 42, 0, 4294967295)),
       boundary: val('param-boundary', 'clamp'),
       topology: val('param-topology', 'global'),
       update_mode: val('param-update-mode', 'synchronous') === 'synchronous' ? 'sync' : 'async',
       inertia_schedule: val('param-inertia-schedule', 'constant'),
-      constriction: chk('param-constriction'),
-      manual_random: false
+      constriction: chk('param-constriction')
     };
   }
 
@@ -579,6 +605,7 @@ export function initProblemPicker(problems, activeId, onSelect) {
     const isActive = prob.id === activeId;
     card.className = `problem-card ${isActive ? 'problem-card--active' : ''}`;
     card.setAttribute('role', 'option');
+    card.tabIndex = 0;
     card.setAttribute('aria-selected', String(isActive));
     card.setAttribute('data-id', prob.id);
     card.style.cursor = 'pointer';
@@ -615,6 +642,12 @@ export function initProblemPicker(problems, activeId, onSelect) {
 
       if (onSelect) onSelect(prob);
     });
+    card.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      card.click();
+    });
 
     container.appendChild(card);
   }
@@ -644,6 +677,7 @@ export function initProblemPicker(problems, activeId, onSelect) {
           id: 'custom',
           name: `Custom f(${res.variables.join(',') || 'x'})`,
           formula: expr,
+          variables: res.variables,
           isCustom: true,
           expression: expr,
           dimensions: res.variables.length || 1,

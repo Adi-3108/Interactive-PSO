@@ -35,15 +35,12 @@
 /* Primary */
 .btn--primary {
   background: var(--c-accent);
-  color: #fff;
+  color: var(--c-on-accent);
 }
 
-.btn--primary:hover {
-  background: var(--c-accent-hover);
-}
-
+.btn--primary:hover,
 .btn--primary:active {
-  background: #3730A3;
+  background: var(--c-accent-hover);
 }
 
 /* Secondary */
@@ -674,7 +671,7 @@
 
 .transport__btn--play {
   background: var(--c-accent);
-  color: #fff;
+  color: var(--c-on-accent);
   border-color: var(--c-accent);
 }
 
@@ -892,7 +889,9 @@ textarea:focus-visible {
 }
 
 .tour-overlay.is-active {
-  display: block;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-3);
   pointer-events: auto;
 }
 
@@ -903,12 +902,14 @@ textarea:focus-visible {
 }
 
 .tour-step {
-  position: absolute;
+  position: relative;
   background: var(--c-surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: var(--sp-5);
-  max-width: 380px;
+  width: min(100%, 380px);
+  max-height: 100%;
+  overflow: auto;
   z-index: 3001;
   display: none;
 }

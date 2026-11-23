@@ -198,6 +198,51 @@ export function runVerification() {
   check('Step-forward restores the recorded future state', replayedSnap.particles[0].x[0], snap2.particles[0].x[0],
     approxEq(replayedSnap.particles[0].x[0], snap2.particles[0].x[0]));
 
+  // Predict must score the same landing that Move produces, without advancing
+  // the engine when it previews the target.
+  for (const [boundary, expectedX] of [['clamp', 1], ['reflect', 0.5], ['absorb', 1]]) {
+    const engine = new PSOEngine({
+      fn: x => x * x, domain: [[-1, 1]], N: 1, w: 1, c1: 0, c2: 0,
+      vmax_pct: 0, boundary, init_positions: [[0.75]], init_velocities: [[0.75]]
+    });
+    engine.initialize();
+    engine.microStep();
+    const before = JSON.stringify(engine.getState());
+    const projected = engine.getLandingPosition(0)[0];
+    const unchanged = JSON.stringify(engine.getState()) === before;
+    engine.microStep();
+    check(`Prediction matches ${boundary} landing`, projected, expectedX,
+      unchanged && approxEq(projected, expectedX) &&
+      approxEq(projected, engine.getParticles()[0].x[0]));
+  }
+
+  const asyncEngine = new PSOEngine({ ...tbEngine.config, update_mode: 'async' });
+  asyncEngine.initialize();
+  asyncEngine.microStep();
+  const beforeMove = asyncEngine.getParticles()[2].x[0];
+  asyncEngine.microStep();
+  const afterMove = asyncEngine.getParticles()[2].x[0];
+  check('Asynchronous velocity uses an earlier particle’s new best', afterMove, 0.75,
+    approxEq(beforeMove, 2) && approxEq(afterMove, 0.75));
+
+  const decayEngine = new PSOEngine({
+    fn: x => x * x, domain: [[-1, 1]], N: 1, w: 0.8,
+    max_iter: 3, inertia_schedule: 'linear'
+  });
+  decayEngine.initialize();
+  const weights = Array.from({ length: 3 }, () => decayEngine.fullIteration()[0].details[0].w);
+  const expectedWeights = [0.8, 0.6, 0.4];
+  check('Linear inertia reaches half the starting weight', weights.map(v => v.toFixed(2)).join(', '),
+    expectedWeights.map(v => v.toFixed(2)).join(', '),
+    weights.every((value, index) => approxEq(value, expectedWeights[index])));
+
+  hist.back();
+  hist.replaceCurrent({ ...snap1, params: { w: 0.6 }, stepResult: { type: 'check_stop' } });
+  const edited = hist.current();
+  check('Continuing an edited run retains its current snapshot', edited.params.w, 0.6,
+    approxEq(edited.particles[0].x[0], snap1.particles[0].x[0]) &&
+    edited.params.w === 0.6 && edited.stepResult.type === 'check_stop' && !hist.canForward());
+
   const passedCount = results.filter(r => r.passed).length;
   const passed = passedCount === results.length;
 

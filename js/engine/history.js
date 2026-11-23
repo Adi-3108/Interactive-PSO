@@ -47,6 +47,16 @@ export class History {
     }
   }
 
+  /** Replace the state at the cursor after an edit and drop its old future. */
+  replaceCurrent(state) {
+    if (this._cursor < 0) {
+      this.push(state);
+      return;
+    }
+    this._entries.length = this._cursor + 1;
+    this._entries[this._cursor] = deepClone(state);
+  }
+
   /**
    * Move one step back and return the state there.
    * @returns {*|null} The previous state (deep-cloned), or null if at the beginning.

@@ -39,8 +39,10 @@ const GLOSSARY = {
     'A single sub-operation within one iteration — e.g., evaluate, update pbest, compute velocity. SwarmLab shows each one so you can see the algorithm in slow motion.',
 };
 
-/** @type {Set<string>} All glossary term keys, lowercase */
-const GLOSSARY_KEYS = new Set(Object.keys(GLOSSARY));
+const GLOSSARY_PATTERN = new RegExp(
+  `\\b(${Object.keys(GLOSSARY).map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
+  'gi'
+);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -50,38 +52,13 @@ const GLOSSARY_KEYS = new Set(Object.keys(GLOSSARY));
  * @returns {{html: string, found: string[]}}
  */
 function annotateTerms(text) {
-  // Keep glossary data out of generated attributes. The old implementation
-  // inserted definitions into aria-label, then later regex passes matched
-  // words inside those definitions and produced broken nested spans.
-  {
-    const found = [];
-    let html = text;
-    for (const term of Object.keys(GLOSSARY)) {
-      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`\\b(${escaped})\\b`, 'gi');
-      if (re.test(html)) {
-        found.push(term);
-        html = html.replace(re, `<span class="glossary-term" tabindex="0" data-term="${term}">$1<sup class="glossary-icon">i</sup></span>`);
-      }
-    }
-    return { html, found };
-  }
-
-  const found = [];
-  let html = text;
-  for (const [term, definition] of Object.entries(GLOSSARY)) {
-    // Case-insensitive whole-word match (handle multi-word terms too)
-    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\b(${escaped})\\b`, 'gi');
-    if (re.test(html)) {
-      found.push(term);
-      html = html.replace(
-        re,
-        `<span class="glossary-term" tabindex="0" data-term="${term}" aria-label="${definition.replace(/"/g, '&quot;')}">$1<sup class="glossary-icon">ⓘ</sup></span>`
-      );
-    }
-  }
-  return { html, found };
+  const found = new Set();
+  const html = text.replace(GLOSSARY_PATTERN, match => {
+    const term = match.toLowerCase();
+    found.add(term);
+    return `<span class="glossary-term" tabindex="0" data-term="${term}">${match}<sup class="glossary-icon" aria-hidden="true">ⓘ</sup></span>`;
+  });
+  return { html, found: [...found] };
 }
 
 /**
@@ -330,8 +307,8 @@ function narrateComputeVelocity(step, params) {
   // Build the story
   let text =
     `${subject} decides where to go next. ` +
-    `It remembers where it was heading (inertia), feels a pull towards the best place *it* has ever visited (its own memory), ` +
-    `and a pull towards the best place *anyone* has found (the swarm's wisdom). `;
+    `It remembers where it was heading (inertia), feels a pull towards the best place it has visited (its own memory), ` +
+    `and feels another pull towards the best place the swarm has found. `;
 
   // Compare social vs cognitive
   if (c2 > c1) {

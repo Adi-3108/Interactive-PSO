@@ -90,7 +90,7 @@ export class PSOEngine {
     if (c.manual_r2 === undefined) c.manual_r2 = 0.5;
     if (!c.inertia_schedule) c.inertia_schedule = 'constant';
     if (c.w_max === undefined) c.w_max = c.w;
-    if (c.w_min === undefined) c.w_min = c.w;
+    if (c.w_min === undefined) c.w_min = c.inertia_schedule === 'linear' ? c.w / 2 : c.w;
 
     // Compute Vmax per dimension
     /** @type {number[]} */
@@ -140,6 +140,7 @@ export class PSOEngine {
     this._microIndex = 0;
     this._finished = false;
     this._particles = [];
+    this._gbest = null;
 
     for (let i = 0; i < c.N; i++) {
       // Position
@@ -224,15 +225,15 @@ export class PSOEngine {
    * @param {number} particleIndex
    * @returns {{position: number[], fitness: number, particle_id: number}}
    */
-  _getNeighbourhoodBest(particleIndex) {
+  _getNeighbourhoodBest(particleIndex, particles = this._particles, globalBest = this._gbest) {
     if (this.config.topology === 'ring') {
-      const N = this._particles.length;
+      const N = particles.length;
       const left = (particleIndex - 1 + N) % N;
       const right = (particleIndex + 1) % N;
       const neighbours = [left, particleIndex, right];
       let best = null;
       for (const idx of neighbours) {
-        const p = this._particles[idx];
+        const p = particles[idx];
         if (best === null || p.pbest_fitness < best.fitness) {
           best = { position: p.pbest.slice(), fitness: p.pbest_fitness, particle_id: p.id };
         }
@@ -240,7 +241,7 @@ export class PSOEngine {
       return best;
     }
     // Global topology
-    return { ...this._gbest, position: this._gbest.position.slice() };
+    return { ...globalBest, position: globalBest.position.slice() };
   }
 
   /**
@@ -303,6 +304,21 @@ export class PSOEngine {
         }
       }
     }
+  }
+
+  /** Project a move without changing the current position or velocity. */
+  _projectMove(particle) {
+    const move = {
+      x: particle.x.map((x, d) => x + particle.v[d]),
+      v: particle.v.slice()
+    };
+    this._applyBoundary(move);
+    return move;
+  }
+
+  getLandingPosition(particleId) {
+    const particle = this._particles.find(p => p.id === particleId);
+    return particle ? this._projectMove(particle).x : null;
   }
 
   // ─── Micro-step engine ────────────────────────────────────────────────
@@ -386,9 +402,12 @@ export class PSOEngine {
         p.pbest = p.x.slice();
         p.pbest_fitness = p.fitness;
         p.improved = true;
+      } else if (this.config.update_mode !== 'async') {
+        p.improved = false;
+      }
+      if (p.improved) {
         details.push({ id: p.id, improved: true, new_pbest: p.pbest.slice(), new_pbest_fitness: p.pbest_fitness });
       } else {
-        p.improved = false;
         details.push({ id: p.id, improved: false });
       }
     }
@@ -419,12 +438,14 @@ export class PSOEngine {
     const w = this._getW();
     const details = [];
 
-    // In synchronous mode, capture gbest BEFORE any updates
-    // (neighbourhood best is computed per-particle for ring topology)
+    // Plan asynchronous moves in particle order. Later velocities see earlier
+    // improvements, while the Move phase still controls when positions change.
+    const preview = c.update_mode === 'async' ? this._particles.map(p => ({ ...p })) : null;
+    let previewBest = this._gbest;
 
     for (let i = 0; i < this._particles.length; i++) {
       const p = this._particles[i];
-      const nbest = this._getNeighbourhoodBest(i);
+      const nbest = this._getNeighbourhoodBest(i, preview ?? this._particles, previewBest);
       const newV = [];
       const inertia = [];
       const cognitive = [];
@@ -466,6 +487,18 @@ export class PSOEngine {
 
       p.v = newV;
 
+      if (preview) {
+        const landing = this._projectMove(p).x;
+        const fitness = this._evaluate(landing);
+        if (fitness < p.pbest_fitness) {
+          preview[i].pbest = landing;
+          preview[i].pbest_fitness = fitness;
+          if (fitness < previewBest.fitness) {
+            previewBest = { position: landing, fitness, particle_id: p.id };
+          }
+        }
+      }
+
       details.push({
         id: p.id,
         v: newV.slice(),
@@ -488,11 +521,9 @@ export class PSOEngine {
     for (const p of this._particles) {
       const oldX = p.x.slice();
 
-      for (let d = 0; d < c.D; d++) {
-        p.x[d] = p.x[d] + p.v[d];
-      }
-
-      this._applyBoundary(p);
+      const move = this._projectMove(p);
+      p.x = move.x;
+      p.v = move.v;
 
       // Re-evaluate after move
       p.fitness = this._evaluate(p.x);
@@ -507,10 +538,10 @@ export class PSOEngine {
 
       // Async mode: update pbest and gbest immediately after each particle
       if (c.update_mode === 'async') {
-        if (p.fitness < p.pbest_fitness) {
+        p.improved = p.fitness < p.pbest_fitness;
+        if (p.improved) {
           p.pbest = p.x.slice();
           p.pbest_fitness = p.fitness;
-          p.improved = true;
         }
         this._updateGlobalBest(false);
       }
