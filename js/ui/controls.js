@@ -145,7 +145,7 @@ export function showToast(message, type = 'info', duration = 4000, actions = [],
   if (!container) return;
 
   const toast = document.createElement('div');
-  toast.className = `toast toast--${type}`;
+  toast.className = `toast toast--${type} is-visible`;
   toast.setAttribute('role', 'alert');
 
   let actionsHtml = '';

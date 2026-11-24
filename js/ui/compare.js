@@ -46,24 +46,20 @@ export class CompareManager {
         </div>
 
         <!-- Controls bar for comparison -->
-        <div class="form-row--inline" style="gap:12px; margin-bottom:16px; background:var(--bg-alt, rgba(0,0,0,0.03)); padding:10px 14px; border-radius:8px;">
+        <div class="form-row--inline" style="gap:8px; margin-bottom:12px; background:var(--c-surface-muted); padding:10px; border-radius:8px;">
           <button class="btn btn--primary btn--sm" id="btn-comp-step" type="button">⏩ Step Both Swarms</button>
           <button class="btn btn--secondary btn--sm" id="btn-comp-run" type="button">▶ Run 10 Iterations</button>
           <button class="btn btn--secondary btn--sm" id="btn-comp-reset" type="button">⏮ Reset Both</button>
 
-          <div style="margin-left:auto; display:flex; gap:16px; font-size:12px; font-weight:600;">
-            <span style="color:var(--c-accent,#4F46E5);">■ Swarm A (Global)</span>
-            <span style="color:var(--c-warning,#F59E0B);">■ Swarm B (Ring)</span>
-          </div>
         </div>
 
         <!-- Dual metric summary cards -->
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
-          <div class="card" style="padding:12px; border:1px solid var(--border,#E3E7EE); border-radius:8px;">
+        <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:12px;">
+          <div class="card" style="padding:12px; border:1px solid var(--c-border); border-radius:8px;">
             <div style="font-weight:700; color:var(--c-accent,#4F46E5); margin-bottom:6px;">Swarm A (Global)</div>
             <div style="font-size:13px;" id="comp-stat-a">Best f: — | Diversity: —</div>
           </div>
-          <div class="card" style="padding:12px; border:1px solid var(--border,#E3E7EE); border-radius:8px;">
+          <div class="card" style="padding:12px; border:1px solid var(--c-border); border-radius:8px;">
             <div style="font-weight:700; color:var(--c-warning,#F59E0B); margin-bottom:6px;">Swarm B (Ring)</div>
             <div style="font-size:13px;" id="comp-stat-b">Best f: — | Diversity: —</div>
           </div>

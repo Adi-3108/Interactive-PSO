@@ -1,74 +1,80 @@
 /**
- * @fileoverview Canvas-based charts for SwarmLab: Convergence and Diversity.
- * Zero external dependencies. High-DPI support, dark/light theme aware,
- * interactive click-to-scrub.
- * @module ui/charts
+ * Canvas charts for convergence, diversity and swarm comparison.
+ * All drawing coordinates are CSS pixels, including iteration selection.
  */
 
+const NUMBER_FONT = '11px "JetBrains Mono", ui-monospace, monospace';
+const LABEL_FONT = '600 11px Inter, system-ui, sans-serif';
+const LOG_FLOOR = 1e-9;
+
+const SERIES = {
+  best: { key: 'best', label: 'Best', tone: 'best', width: 2.6, dash: [] },
+  mean: { key: 'mean', label: 'Mean', tone: 'mean', width: 1.7, dash: [6, 4] },
+  worst: { key: 'worst', label: 'Worst', tone: 'worst', width: 1.5, dash: [2, 4] },
+  diversity: { key: 'diversity', label: 'Swarm diversity', tone: 'diversity', width: 2.6, dash: [] },
+};
+const COMPARISON = [
+  { ...SERIES.best, label: 'A · Global', tone: 'global' },
+  { ...SERIES.mean, label: 'B · Ring', tone: 'ring' },
+];
+
+function formatTick(value) {
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1e4 || (magnitude > 0 && magnitude < 0.01)) return value.toExponential(1);
+  return String(Number(value.toPrecision(3)));
+}
+
 export class ChartRenderer {
-  /**
-   * @param {HTMLCanvasElement} canvas
-   * @param {Object} [options]
-   */
   constructor(canvas, options = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.options = {
-      type: 'convergence', // 'convergence' | 'diversity'
+      type: 'convergence',
       logScale: false,
       onClickIteration: null,
       ...options
     };
-
-    this.history = []; // [{iteration, best, mean, worst, diversity}]
+    this.history = [];
     this.currentIteration = 0;
 
     this._setupCanvas();
     this._bindEvents();
     if ('ResizeObserver' in window) {
       this._resizeObserver = new ResizeObserver(() => {
-        if (!this.canvas || this.canvas.offsetParent === null) return;
-        this._setupCanvas();
-        this.render();
+        if (this._setupCanvas()) this.render();
       });
       this._resizeObserver.observe(this.canvas);
     }
   }
 
   _setupCanvas() {
-    if (!this.canvas) return;
     const dpr = window.devicePixelRatio || 1;
-    const rect = this.canvas.getBoundingClientRect();
-    const width = rect.width || 400;
-    const height = rect.height || 200;
+    const { width, height } = this.canvas.getBoundingClientRect();
+    if (!width || !height || !this.ctx) return false;
 
-    this.canvas.width = Math.floor(width * dpr);
-    this.canvas.height = Math.floor(height * dpr);
-    this.ctx.resetTransform?.();
-    this.ctx.scale(dpr, dpr);
+    this.canvas.width = Math.round(width * dpr);
+    this.canvas.height = Math.round(height * dpr);
+    this.ctx.setTransform(this.canvas.width / width, 0, 0, this.canvas.height / height, 0, 0);
     this.logicalWidth = width;
     this.logicalHeight = height;
+    return true;
   }
 
   _bindEvents() {
-    if (!this.canvas) return;
-    this.canvas.addEventListener('click', (e) => {
-      if (!this.options.onClickIteration || this.history.length === 0) return;
-      const rect = this.canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const padding = { left: 55, right: 20 };
-      const chartW = this.logicalWidth - padding.left - padding.right;
-      if (x < padding.left || x > this.logicalWidth - padding.right) return;
+    this.canvas.addEventListener('click', (event) => {
+      if (!this.options.onClickIteration || !this.history.length || !this.plot) return;
 
-      const frac = (x - padding.left) / chartW;
-      const maxIter = Math.max(1, this.history.length - 1);
-      const clickedIter = Math.round(frac * maxIter);
-      this.options.onClickIteration(clickedIter);
+      const { left } = this.canvas.getBoundingClientRect();
+      const { x, width, last } = this.plot;
+      const offset = event.clientX - left - x;
+      if (offset < -1 || offset > width + 1) return;
+
+      const fraction = Math.max(0, Math.min(1, offset / width));
+      this.options.onClickIteration(Math.round(fraction * last));
     });
 
     window.addEventListener('resize', () => {
-      this._setupCanvas();
-      this.render();
+      if (this._setupCanvas()) this.render();
     });
   }
 
@@ -89,264 +95,252 @@ export class ChartRenderer {
   }
 
   _getThemeColors() {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const colors = this.options.comparison ? getComputedStyle(document.documentElement) : null;
+    const root = document.documentElement;
+    const dark = root.getAttribute('data-theme') === 'dark';
+    const styles = getComputedStyle(root);
     return {
-      bg: isDark ? '#161D28' : '#FFFFFF',
-      text: isDark ? '#9AA7B8' : '#5B6778',
-      textStrong: isDark ? '#E8EDF4' : '#1B2430',
-      border: isDark ? '#263243' : '#E3E7EE',
-      grid: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-      best: colors?.getPropertyValue('--c-accent').trim() || '#F5B301',
-      mean: colors?.getPropertyValue('--c-warning').trim() || '#2563EB',
-      worst: '#DC2626',   // red
-      diversity: '#10B981', // emerald
-      indicator: isDark ? '#FFFFFF' : '#111827'
+      text: styles.getPropertyValue('--c-text-soft').trim(),
+      heading: styles.getPropertyValue('--c-text-strong').trim(),
+      grid: dark ? 'rgba(191, 199, 214, .13)' : 'rgba(73, 86, 117, .13)',
+      axis: dark ? '#505D73' : '#C3C9DA',
+      cursor: dark ? '#AEBBCC' : '#65748C',
+      pointEdge: styles.getPropertyValue('--c-graph-surface').trim(),
+      best: dark ? '#65DFD7' : '#087F82',
+      mean: dark ? '#A8B7F4' : '#506BAB',
+      worst: dark ? '#F4A587' : '#AC593D',
+      diversity: dark ? '#72DDB3' : '#167A61',
+      global: styles.getPropertyValue('--c-accent').trim(),
+      ring: styles.getPropertyValue('--c-warning').trim(),
+      area: dark ? 'rgba(136, 164, 188, .15)' : 'rgba(91, 137, 158, .12)',
+      diversityArea: dark ? 'rgba(134, 179, 164, .15)' : 'rgba(84, 148, 132, .12)',
     };
   }
 
   render() {
-    if (!this.canvas || !this.ctx) return;
     const ctx = this.ctx;
     const w = this.logicalWidth;
     const h = this.logicalHeight;
-    const colors = this._getThemeColors();
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (!ctx || !w || !h) return;
 
+    this.plot = null;
     ctx.clearRect(0, 0, w, h);
 
-    if (!this.history || this.history.length === 0) {
+    const colors = this._getThemeColors();
+    const data = this.history;
+    const diversity = this.options.type === 'diversity';
+    const series = this.options.comparison
+      ? COMPARISON
+      : diversity ? [SERIES.diversity] : [SERIES.best, SERIES.mean, SERIES.worst];
+    let min = Infinity;
+    let max = -Infinity;
+    for (const row of data) {
+      for (const item of series) {
+        const value = row?.[item.key];
+        if (!Number.isFinite(value)) continue;
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+    }
+
+    if (min === Infinity) {
       ctx.fillStyle = colors.text;
-      ctx.font = '13px Inter, sans-serif';
+      ctx.font = LABEL_FONT;
       ctx.textAlign = 'center';
-      ctx.fillText('No history data available yet.', w / 2, h / 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText('No history values to plot', w / 2, h / 2);
       return;
     }
 
-    const padding = { top: 25, right: 25, bottom: 35, left: 55 };
-    const chartW = w - padding.left - padding.right;
-    const chartH = h - padding.top - padding.bottom;
-
-    // Collect bounds
-    const data = this.history;
-    const N = data.length;
-    const maxIter = Math.max(1, N - 1);
-
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    if (this.options.type === 'convergence') {
-      for (const d of data) {
-        if (d.best != null && !isNaN(d.best)) {
-          minY = Math.min(minY, d.best);
-          maxY = Math.max(maxY, d.best);
-        }
-        if (d.mean != null && !isNaN(d.mean)) {
-          minY = Math.min(minY, d.mean);
-          maxY = Math.max(maxY, d.mean);
-        }
-        if (d.worst != null && !isNaN(d.worst)) {
-          minY = Math.min(minY, d.worst);
-          maxY = Math.max(maxY, d.worst);
-        }
-      }
-    } else {
-      // Diversity
-      minY = 0;
-      for (const d of data) {
-        if (d.diversity != null && !isNaN(d.diversity)) {
-          maxY = Math.max(maxY, d.diversity);
-        }
-      }
-      if (maxY <= 0) maxY = 1;
+    if (diversity) min = 0;
+    const log = this.options.logScale && min >= 0;
+    if (log) {
+      min = Math.log10(Math.max(LOG_FLOOR, min));
+      max = Math.log10(Math.max(LOG_FLOOR, max));
+      if (min === max) max += 1;
+    } else if (min === max) {
+      const padding = Math.abs(min || 1) * 0.1;
+      if (min > 0) min -= padding;
+      else if (min < 0) max += padding;
+      else max = 1;
     }
 
-    if (minY === Infinity || maxY === -Infinity) {
-      minY = 0;
-      maxY = 1;
-    }
-    if (minY === maxY) {
-      minY -= 1;
-      maxY += 1;
-    }
+    const yTicks = h < 135 ? 3 : 4;
+    const labels = Array.from({ length: yTicks + 1 }, (_, i) => {
+      const fraction = i / yTicks;
+      const value = (1 - fraction) * max + fraction * min;
+      return formatTick(log ? 10 ** value : value);
+    });
 
-    // Y transform function
-    const useLog = this.options.logScale && minY >= 0;
-    const logMin = useLog ? Math.log10(Math.max(1e-6, minY)) : 0;
-    const logMax = useLog ? Math.log10(Math.max(1e-5, maxY)) : 1;
+    ctx.font = NUMBER_FONT;
+    const left = Math.max(35, ...labels.map(label => ctx.measureText(label).width + 16));
+    const right = 15;
+    const top = 35;
+    const bottom = 33;
+    const width = w - left - right;
+    const height = h - top - bottom;
+    if (width <= 0 || height <= 0) return;
 
-    const getY = (val) => {
-      if (useLog) {
-        const lv = Math.log10(Math.max(1e-6, val));
-        const frac = (lv - logMin) / (logMax - logMin || 1);
-        return padding.top + (1 - Math.max(0, Math.min(1, frac))) * chartH;
-      }
-      const frac = (val - minY) / (maxY - minY || 1);
-      return padding.top + (1 - frac) * chartH;
+    const last = data.length - 1;
+    this.plot = { x: left, width, last };
+    const getX = (iteration) => left + (iteration / Math.max(1, last)) * width;
+    const scale = Math.max(Math.abs(min), Math.abs(max)) || 1;
+    const low = min / scale;
+    const range = max / scale - low || 1;
+    const getY = (value) => {
+      const mapped = log ? Math.log10(Math.max(LOG_FLOOR, value)) : value;
+      return top + (1 - (mapped / scale - low) / range) * height;
     };
 
-    const getX = (i) => padding.left + (i / maxIter) * chartW;
-
-    // Draw grid & Y axis ticks
     ctx.strokeStyle = colors.grid;
     ctx.lineWidth = 1;
     ctx.fillStyle = colors.text;
-    ctx.font = '11px "JetBrains Mono", monospace';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-
-    const yTicks = 4;
-    for (let t = 0; t <= yTicks; t++) {
-      const frac = t / yTicks;
-      const y = padding.top + frac * chartH;
-      let val = useLog
-        ? Math.pow(10, logMax - frac * (logMax - logMin))
-        : maxY - frac * (maxY - minY);
-
+    labels.forEach((label, index) => {
+      const y = top + index / yTicks * height;
       ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(w - padding.right, y);
+      ctx.moveTo(left, y);
+      ctx.lineTo(left + width, y);
       ctx.stroke();
+      ctx.fillText(label, left - 8, y);
+    });
 
-      const label = val >= 1e4 || (val < 1e-2 && val > 0)
-        ? val.toExponential(1)
-        : val.toFixed(val < 10 ? 2 : 0);
-      ctx.fillText(label, padding.left - 8, y);
-    }
-
-    // X axis ticks
+    const xTicks = Math.min(width < 260 ? 4 : 6, last);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    const xTicks = Math.min(5, maxIter);
-    for (let t = 0; t <= xTicks; t++) {
-      const iterVal = Math.round((t / xTicks) * maxIter);
-      const x = getX(iterVal);
-
+    for (let index = 0; index <= xTicks; index++) {
+      const iteration = xTicks ? Math.round(index / xTicks * last) : 0;
+      const x = getX(iteration);
       ctx.beginPath();
-      ctx.moveTo(x, padding.top);
-      ctx.lineTo(x, padding.top + chartH);
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, top + height);
       ctx.stroke();
-
-      ctx.fillText(String(iterVal), x, padding.top + chartH + 8);
+      ctx.fillText(String(iteration), x, top + height + 6);
     }
 
-    // Axis labels
-    ctx.font = '11px Inter, sans-serif';
+    ctx.strokeStyle = colors.axis;
+    ctx.beginPath();
+    ctx.moveTo(left, top);
+    ctx.lineTo(left, top + height);
+    ctx.lineTo(left + width, top + height);
+    ctx.stroke();
     ctx.fillStyle = colors.text;
-    ctx.textAlign = 'center';
-    ctx.fillText('Iteration', padding.left + chartW / 2, h - 14);
+    ctx.font = LABEL_FONT;
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('Iteration', left + width / 2, h - 3);
 
-    ctx.save();
-    ctx.translate(14, padding.top + chartH / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText(this.options.type === 'convergence' ? 'Fitness f(x)' : 'Centroid Diversity', 0, 0);
-    ctx.restore();
-
-    // Plot lines helper
-    const drawLine = (prop, color, lineWidth = 2) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i < data.length; i++) {
-        const val = data[i][prop];
-        if (val == null || isNaN(val)) continue;
-        const px = getX(i);
-        const py = getY(val);
-        if (!started) {
-          ctx.moveTo(px, py);
-          started = true;
-        } else {
-          ctx.lineTo(px, py);
-        }
+    // Missing values break lines and fills so they cannot imply observed data.
+    for (const item of [...series].reverse()) {
+      let segment = [];
+      const primary = item === series[0] && !this.options.comparison;
+      const gradient = primary ? ctx.createLinearGradient(0, top, 0, top + height) : null;
+      if (gradient) {
+        gradient.addColorStop(0, diversity ? colors.diversityArea : colors.area);
+        gradient.addColorStop(1, 'transparent');
       }
-      ctx.stroke();
-    };
-
-    if (this.options.type === 'convergence') {
-      if (!this.options.comparison) drawLine('worst', colors.worst, 1.5);
-      drawLine('mean', colors.mean, 2);
-      drawLine('best', colors.best, 2.5);
-
-      // Legend
-      const legend = this.options.comparison ? [
-        { label: 'A · Global', color: colors.best },
-        { label: 'B · Ring', color: colors.mean }
-      ] : [
-        { label: 'Best f(g)', color: colors.best },
-        { label: 'Mean', color: colors.mean },
-        { label: 'Worst', color: colors.worst }
-      ];
-      this._drawLegend(ctx, legend, padding.left + 10, padding.top - 15);
-    } else {
-      drawLine('diversity', colors.diversity, 2.5);
-
-      // Fill area under diversity curve
-      ctx.fillStyle = isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)';
-      ctx.beginPath();
-      ctx.moveTo(getX(0), padding.top + chartH);
-      for (let i = 0; i < data.length; i++) {
-        ctx.lineTo(getX(i), getY(data[i].diversity || 0));
-      }
-      ctx.lineTo(getX(data.length - 1), padding.top + chartH);
-      ctx.closePath();
-      ctx.fill();
-
-      this._drawLegend(ctx, [
-        { label: 'Swarm Diversity (Mean distance to centroid)', color: colors.diversity }
-      ], padding.left + 10, padding.top - 15);
-    }
-
-    // Current iteration vertical marker
-    if (this.currentIteration >= 0 && this.currentIteration <= maxIter) {
-      const curX = getX(this.currentIteration);
-      ctx.save();
-      ctx.strokeStyle = colors.indicator;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(curX, padding.top);
-      ctx.lineTo(curX, padding.top + chartH);
-      ctx.stroke();
-
-      // Current point dot
-      const pt = data[this.currentIteration];
-      if (pt) {
-        ctx.setLineDash([]);
-        const targetVal = this.options.type === 'convergence' ? pt.best : pt.diversity;
-        if (targetVal != null && !isNaN(targetVal)) {
-          const py = getY(targetVal);
-          ctx.fillStyle = this.options.type === 'convergence' ? colors.best : colors.diversity;
+      const drawSegment = () => {
+        if (segment.length > 1) {
           ctx.beginPath();
-          ctx.arc(curX, py, 4, 0, Math.PI * 2);
-          ctx.fill();
+          segment.forEach(([x, y], index) => index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+          ctx.strokeStyle = colors[item.tone];
+          ctx.lineWidth = item.width;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          ctx.setLineDash(item.dash);
+          ctx.stroke();
+
+          if (gradient) {
+            ctx.lineTo(segment.at(-1)[0], top + height);
+            ctx.lineTo(segment[0][0], top + height);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+          }
+        } else if (segment.length === 1) {
+          this._drawPoint(segment[0][0], segment[0][1], colors[item.tone], colors.pointEdge, 2.8);
         }
-      }
-      ctx.restore();
+        segment = [];
+      };
+
+      data.forEach((row, index) => {
+        const value = row?.[item.key];
+        if (Number.isFinite(value)) segment.push([getX(index), getY(value)]);
+        else drawSegment();
+      });
+      drawSegment();
     }
+    ctx.setLineDash([]);
+
+    const current = this.currentIteration;
+    if (current >= 0 && current <= last) {
+      const x = getX(current);
+      ctx.strokeStyle = colors.cursor;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, top + height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Use a larger marker for B so both series show when the results coincide.
+      [...series].reverse().forEach((item) => {
+        const value = data[current]?.[item.key];
+        if (!Number.isFinite(value)) return;
+        const radius = this.options.comparison && item !== series[0] ? 7 : 4;
+        this._drawPoint(x, getY(value), colors[item.tone], colors.pointEdge, radius);
+      });
+    }
+
+    this._drawLegend(series, colors, w, diversity);
   }
 
-  _drawLegend(ctx, items, x, y) {
-    ctx.font = '11px Inter, sans-serif';
-    ctx.textBaseline = 'middle';
+  _drawPoint(x, y, color, edge, radius) {
+    const ctx = this.ctx;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+
+  _drawLegend(series, colors, width, diversity) {
+    const ctx = this.ctx;
+    const compact = width < 315;
+    const y = 16;
+    let x = 13;
+    ctx.font = LABEL_FONT;
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
 
-    let curX = x;
-    for (const item of items) {
-      ctx.fillStyle = item.color;
-      ctx.fillRect(curX, y - 4, 12, 8);
-
-      ctx.fillStyle = document.documentElement.getAttribute('data-theme') === 'dark' ? '#E8EDF4' : '#1B2430';
-      ctx.fillText(item.label, curX + 16, y);
-
-      curX += ctx.measureText(item.label).width + 30;
+    if (!compact) {
+      const metric = diversity ? 'Distance' : 'Fitness';
+      ctx.fillStyle = colors.text;
+      ctx.fillText(metric, x, y);
+      x += ctx.measureText(metric).width + 17;
     }
+
+    for (const item of series) {
+      ctx.strokeStyle = colors[item.tone];
+      ctx.lineWidth = item.width;
+      ctx.lineCap = 'round';
+      ctx.setLineDash(item.dash);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 15, y);
+      ctx.stroke();
+
+      ctx.fillStyle = colors.heading;
+      ctx.fillText(item.label, x + 21, y);
+      x += ctx.measureText(item.label).width + (compact ? 31 : 38);
+    }
+    ctx.setLineDash([]);
   }
 }
 
-/**
- * Convenience factories
- */
 export function renderConvergence(canvas, history, currentIter, options = {}) {
   const chart = new ChartRenderer(canvas, { type: 'convergence', ...options });
   chart.setHistory(history, currentIter);

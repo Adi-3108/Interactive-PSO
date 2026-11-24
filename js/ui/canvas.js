@@ -13,61 +13,29 @@ const PARTICLE_PALETTE = [
   '#0072B2', '#D55E00', '#CC79A7', '#000000'
 ];
 
-/** Reversed viridis-like ramp (low = teal, high = red). 256 entries generated procedurally. */
-function buildViridisReversed() {
-  /** @type {Array<[number, number, number]>} */
-  const stops = [
-    [68, 1, 84],     // 0.00  deep purple
-    [72, 35, 116],   // 0.10
-    [64, 67, 135],   // 0.20
-    [52, 94, 141],   // 0.30
-    [33, 144, 140],  // 0.50  teal
-    [42, 120, 142],  // 0.40
-    [53, 183, 121],  // 0.60
-    [109, 205, 89],  // 0.70
-    [180, 222, 44],  // 0.80
-    [253, 231, 37],  // 0.90  yellow
-    [235, 85, 56],   // 0.95  orange-red
-    [190, 10, 40],   // 1.00  red
-  ];
-  // Re-order: low values → teal, high → red. We'll build a smooth ramp.
-  const ramp = [
-    [33, 144, 140],   // 0.0  teal
-    [42, 120, 142],   // 0.1
-    [52, 94, 141],    // 0.2
-    [64, 67, 135],    // 0.3
-    [68, 1, 84],      // 0.4  deep purple
-    [109, 60, 100],   // 0.5
-    [180, 80, 60],    // 0.6
-    [220, 120, 50],   // 0.7
-    [240, 170, 40],   // 0.8
-    [253, 231, 37],   // 0.9  yellow
-    [245, 130, 40],   // 0.95 orange
-    [200, 40, 40],    // 1.0  red
-  ];
-
-  /** @type {Array<[number, number, number]>} */
-  const result = [];
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    const idx = t * (ramp.length - 1);
-    const lo = Math.floor(idx);
-    const hi = Math.min(lo + 1, ramp.length - 1);
-    const frac = idx - lo;
-    result.push([
-      Math.round(ramp[lo][0] + (ramp[hi][0] - ramp[lo][0]) * frac),
-      Math.round(ramp[lo][1] + (ramp[hi][1] - ramp[lo][1]) * frac),
-      Math.round(ramp[lo][2] + (ramp[hi][2] - ramp[lo][2]) * frac),
-    ]);
-  }
-  return result;
+function buildHeatmap(stops) {
+  return Array.from({ length: 256 }, (_, index) => {
+    const position = index / 255 * (stops.length - 1);
+    const first = Math.floor(position);
+    const next = Math.min(first + 1, stops.length - 1);
+    return stops[first].map((value, channel) =>
+      Math.round(lerp(value, stops[next][channel], position - first)));
+  });
 }
 
-const VIRIDIS_REVERSED = buildViridisReversed();
-const GRAYSCALE_HEATMAP = Array.from({ length: 256 }, (_, index) => {
-  const shade = 24 + Math.round((212 * index) / 255);
-  return [shade, shade, shade];
-});
+// Keep fitness and luminance in the same order across themes and palettes.
+const TERRAIN_HEATMAPS = {
+  light: buildHeatmap([
+    [125, 143, 193], [157, 174, 211], [188, 202, 229], [218, 226, 242], [246, 243, 250],
+  ]),
+  dark: buildHeatmap([
+    [35, 42, 58], [52, 59, 78], [69, 79, 102], [92, 104, 128], [121, 132, 151],
+  ]),
+};
+const GRAYSCALE_HEATMAPS = {
+  light: buildHeatmap([[137, 137, 137], [246, 246, 246]]),
+  dark: buildHeatmap([[36, 36, 36], [151, 151, 151]]),
+};
 
 /** Force-decomposition arrow colours. */
 const FORCE_COLOURS = {
@@ -123,6 +91,10 @@ function isDarkTheme() {
   if (attr === 'dark') return true;
   if (attr === 'light') return false;
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function formatFitness(value) {
+  return Number.isFinite(value) ? value.toFixed(6) : 'Undefined';
 }
 
 /**
@@ -226,10 +198,8 @@ export class CanvasRenderer {
 
     /** Offscreen landscape cache. @type {HTMLCanvasElement|null} */
     this._landscapeCache = null;
-    /** @type {number} */
-    this._landscapeW = 0;
-    /** @type {number} */
-    this._landscapeH = 0;
+    this._curveSamples = [];
+    this._hasLandscapeData = false;
     /** @type {number} min value in landscape */
     this._fMin = 0;
     /** @type {number} max value in landscape */
@@ -479,15 +449,16 @@ export class CanvasRenderer {
 
   /** @private */
   _computePlotArea() {
-    const leftPad = 55;
-    const rightPad = this._dimensions === 2 ? 70 : 20;  // legend space in 2D
-    const topPad = 15;
-    const bottomPad = 40;
+    const narrow = this._width < 420;
+    const leftPad = this._dimensions === 1 ? (narrow ? 47 : 56) : (narrow ? 37 : 47);
+    const rightPad = narrow ? 15 : 20;
+    const topPad = narrow ? 15 : 19;
+    const bottomPad = this._dimensions === 2 ? 62 : 39;
     this._plotArea = {
       x: leftPad,
       y: topPad,
-      w: this._width - leftPad - rightPad,
-      h: this._height - topPad - bottomPad,
+      w: Math.max(1, this._width - leftPad - rightPad),
+      h: Math.max(1, this._height - topPad - bottomPad),
     };
   }
 
@@ -511,7 +482,8 @@ export class CanvasRenderer {
   _toCanvasY(y) {
     if (this._dimensions === 1) {
       // y is f(x), map to vertical axis
-      return mapRange(y, this._fMin, this._fMax,
+      const scale = Math.max(Math.abs(this._fMin), Math.abs(this._fMax)) || 1;
+      return mapRange(y / scale, this._fMin / scale, this._fMax / scale,
         this._plotArea.y + this._plotArea.h, this._plotArea.y);
     }
     return mapRange(y, this._domain[1][0], this._domain[1][1],
@@ -527,98 +499,101 @@ export class CanvasRenderer {
     const pa = this._plotArea;
 
     if (this._dimensions === 1) {
-      this._computeMinMax1D();
-      return; // 1D landscape is drawn inline during _draw
+      this._sampleCurve();
+      return;
     }
 
-    // 2D: render heatmap to offscreen canvas
-    const w = Math.max(1, Math.floor(pa.w));
-    const h = Math.max(1, Math.floor(pa.h));
+    const width = Math.max(2, Math.min(Math.floor(pa.w), 400));
+    const height = Math.max(2, Math.min(Math.floor(pa.h), 400));
+    const values = new Float64Array(width * height);
+    const [xmin, xmax] = this._domain[0];
+    const [ymin, ymax] = this._domain[1];
+    let fMin = Infinity;
+    let fMax = -Infinity;
 
-    // Sample function values
-    const resolution = Math.min(w, 400);
-    const resolutionY = Math.min(h, 400);
-    const values = new Float64Array(resolution * resolutionY);
-    let fMin = Infinity, fMax = -Infinity;
-
-    for (let iy = 0; iy < resolutionY; iy++) {
-      const py = this._domain[1][0] + (iy / (resolutionY - 1)) *
-        (this._domain[1][1] - this._domain[1][0]);
-      for (let ix = 0; ix < resolution; ix++) {
-        const px = this._domain[0][0] + (ix / (resolution - 1)) *
-          (this._domain[0][1] - this._domain[0][0]);
-        const v = this._fn(px, py);
-        values[iy * resolution + ix] = v;
-        if (v < fMin) fMin = v;
-        if (v > fMax) fMax = v;
+    for (let row = 0; row < height; row++) {
+      const y = lerp(ymax, ymin, row / (height - 1));
+      for (let column = 0; column < width; column++) {
+        const x = lerp(xmin, xmax, column / (width - 1));
+        const value = this._fn(x, y);
+        values[row * width + column] = value;
+        if (!Number.isFinite(value)) continue;
+        fMin = Math.min(fMin, value);
+        fMax = Math.max(fMax, value);
       }
     }
 
-    this._fMin = fMin;
-    this._fMax = fMax;
+    this._hasLandscapeData = Number.isFinite(fMin);
+    this._fMin = this._hasLandscapeData ? fMin : 0;
+    this._fMax = this._hasLandscapeData ? fMax : 1;
 
-    // Create offscreen canvas
     const offscreen = document.createElement('canvas');
-    offscreen.width = resolution;
-    offscreen.height = resolutionY;
-    const octx = offscreen.getContext('2d');
-    const imgData = octx.createImageData(resolution, resolutionY);
-    const data = imgData.data;
-
+    offscreen.width = width;
+    offscreen.height = height;
+    const context = offscreen.getContext('2d');
+    const pixels = context.createImageData(width, height);
     const mode = this._options.displayMode;
     const showHeatmap = mode === DisplayMode.HEATMAP || mode === DisplayMode.BOTH;
-    const palette = this._options.colorblind ? GRAYSCALE_HEATMAP : VIRIDIS_REVERSED;
+    const dark = isDarkTheme();
+    const palette = this._getLandscapePalette(dark);
+    const background = dark ? [34, 42, 56] : [247, 248, 252];
+    const noData = dark ? [24, 29, 37] : [225, 224, 229];
+    const scale = Math.max(Math.abs(fMin), Math.abs(fMax)) || 1;
+    const low = fMin / scale;
+    const range = fMax / scale - low || 1;
 
-    for (let iy = 0; iy < resolutionY; iy++) {
-      for (let ix = 0; ix < resolution; ix++) {
-        const idx = (iy * resolution + ix) * 4;
-        if (showHeatmap) {
-          const t = clamp((values[iy * resolution + ix] - fMin) / (fMax - fMin || 1), 0, 1);
-          const ci = Math.round(t * 255);
-          const [r, g, b] = palette[ci];
-          data[idx] = r;
-          data[idx + 1] = g;
-          data[idx + 2] = b;
-          data[idx + 3] = 255;
-        } else {
-          // Plain / contours-only: white/dark background
-          const bg = isDarkTheme() ? 30 : 245;
-          data[idx] = bg;
-          data[idx + 1] = bg;
-          data[idx + 2] = bg;
-          data[idx + 3] = 255;
-        }
-      }
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index];
+      const finite = Number.isFinite(value);
+      const relative = finite ? clamp((value / scale - low) / range, 0, 1) : 0;
+      const color = finite ? (showHeatmap ? palette[Math.round(relative * 255)] : background) : noData;
+      const offset = index * 4;
+      pixels.data[offset] = color[0];
+      pixels.data[offset + 1] = color[1];
+      pixels.data[offset + 2] = color[2];
+      pixels.data[offset + 3] = 255;
     }
 
-    octx.putImageData(imgData, 0, 0);
+    context.putImageData(pixels, 0, 0);
 
-    // Draw contour lines if needed
-    const showContours = mode === DisplayMode.CONTOURS || mode === DisplayMode.BOTH;
-    if (showContours) {
-      this._drawContoursOnCanvas(octx, values, resolution, resolutionY, fMin, fMax);
+    const showContours = this._options.showContourLines &&
+      (mode === DisplayMode.CONTOURS || mode === DisplayMode.BOTH);
+    if (showContours && this._hasLandscapeData && fMin < fMax) {
+      this._drawContoursOnCanvas(context, values, width, height, fMin, fMax);
     }
 
     this._landscapeCache = offscreen;
-    this._landscapeW = w;
-    this._landscapeH = h;
+  }
+
+  _getLandscapePalette(dark) {
+    const palettes = this._options.colorblind ? GRAYSCALE_HEATMAPS : TERRAIN_HEATMAPS;
+    return palettes[dark ? 'dark' : 'light'];
   }
 
   /** @private */
-  _computeMinMax1D() {
-    const steps = 500;
+  _sampleCurve() {
+    const steps = Math.max(2, Math.min(600, Math.ceil(this._plotArea.w)));
     const [xmin, xmax] = this._domain[0];
-    let fMin = Infinity, fMax = -Infinity;
-    for (let i = 0; i <= steps; i++) {
-      const x = xmin + (i / steps) * (xmax - xmin);
-      const v = this._fn(x);
-      if (v < fMin) fMin = v;
-      if (v > fMax) fMax = v;
+    let fMin = Infinity;
+    let fMax = -Infinity;
+    this._curveSamples = Array.from({ length: steps + 1 }, (_, index) => {
+      const value = this._fn(lerp(xmin, xmax, index / steps));
+      if (Number.isFinite(value)) {
+        fMin = Math.min(fMin, value);
+        fMax = Math.max(fMax, value);
+      }
+      return value;
+    });
+
+    this._hasLandscapeData = Number.isFinite(fMin);
+    if (this._hasLandscapeData) {
+      const padding = (fMax - fMin || Math.abs(fMin) || 1) * 0.09;
+      this._fMin = Number.isFinite(fMin - padding) ? fMin - padding : fMin;
+      this._fMax = Number.isFinite(fMax + padding) ? fMax + padding : fMax;
+    } else {
+      this._fMin = 0;
+      this._fMax = 1;
     }
-    // Add padding
-    const range = fMax - fMin || 1;
-    this._fMin = fMin - range * 0.08;
-    this._fMax = fMax + range * 0.08;
   }
 
   /**
@@ -628,11 +603,16 @@ export class CanvasRenderer {
   _drawContoursOnCanvas(ctx, values, w, h, fMin, fMax) {
     const levels = this._options.contourLevels;
     const dark = isDarkTheme();
-    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)';
-    ctx.lineWidth = 0.8;
-
+    ctx.strokeStyle = this._options.colorblind
+      ? (dark ? '#D8D8D8' : '#606060')
+      : (dark ? '#D0D7E7' : '#4C5D83');
     for (let l = 1; l < levels; l++) {
-      const threshold = fMin + (l / levels) * (fMax - fMin);
+      const fraction = l / levels;
+      const threshold = (1 - fraction) * fMin + fraction * fMax;
+      const major = l % 3 === 0;
+      ctx.globalAlpha = major ? 0.43 : 0.24;
+      ctx.lineWidth = major ? 1 : 0.65;
+      ctx.beginPath();
 
       // Simple horizontal line scanning for contour crossings
       for (let iy = 0; iy < h - 1; iy++) {
@@ -641,6 +621,8 @@ export class CanvasRenderer {
           const v10 = values[iy * w + ix + 1];
           const v01 = values[(iy + 1) * w + ix];
           const v11 = values[(iy + 1) * w + ix + 1];
+          if (!Number.isFinite(v00) || !Number.isFinite(v10) ||
+              !Number.isFinite(v01) || !Number.isFinite(v11)) continue;
 
           // Check if contour crosses this cell
           const above00 = v00 >= threshold;
@@ -679,20 +661,18 @@ export class CanvasRenderer {
 
           // Draw line segments between crossing pairs
           if (crossings.length >= 2) {
-            ctx.beginPath();
             ctx.moveTo(crossings[0][0], crossings[0][1]);
             ctx.lineTo(crossings[1][0], crossings[1][1]);
-            ctx.stroke();
             if (crossings.length === 4) {
-              ctx.beginPath();
               ctx.moveTo(crossings[2][0], crossings[2][1]);
               ctx.lineTo(crossings[3][0], crossings[3][1]);
-              ctx.stroke();
             }
           }
         }
       }
+      ctx.stroke();
     }
+    ctx.globalAlpha = 1;
   }
 
   // ─── Main Draw ────────────────────────────────────────────────────
@@ -710,12 +690,10 @@ export class CanvasRenderer {
     this._computePlotArea();
     const pa = this._plotArea;
 
-    // Clear
-    const bg = isDarkTheme() ? '#0F172A' : '#FFFFFF';
-    ctx.fillStyle = bg;
+    ctx.fillStyle = cssVar('--c-graph-frame', isDarkTheme() ? '#1B222E' : '#FCFBFD');
     ctx.fillRect(0, 0, W, H);
 
-    if (!this._fn) return;
+    if (!this._fn || W < 85 || H < 85) return;
 
     if (this._dimensions === 1) {
       this._draw1D(ctx, state);
@@ -727,17 +705,18 @@ export class CanvasRenderer {
     // Draw landscape
     if (!this._landscapeCache) this._renderLandscape();
     if (this._landscapeCache) {
+      ctx.save();
+      this._roundRect(ctx, pa.x, pa.y, pa.w, pa.h, 4);
+      ctx.clip();
       ctx.drawImage(this._landscapeCache, pa.x, pa.y, pa.w, pa.h);
+      ctx.restore();
     }
 
-    // Known optima
+    const shaded = [DisplayMode.HEATMAP, DisplayMode.BOTH].includes(this._options.displayMode);
+    this._drawAxes(ctx);
+    if (shaded) this._drawLegend(ctx);
     this._drawOptima(ctx);
-
-    // Axes
-    this._drawAxes2D(ctx);
-
-    // Colour-scale legend
-    this._drawLegend(ctx);
+    if (!state) return;
 
     // Topology links
     if (this._options.showTopologyLinks && state.topology === 'ring' && state.particles) {
@@ -763,6 +742,7 @@ export class CanvasRenderer {
     if (this._options.showGbest && state.gbest) {
       this._drawGlobalBest(ctx, state);
     }
+    this._drawParticleLabels(ctx, state, true);
 
     // Force decomposition
     if (this._options.showForces && this._options.selectedParticle != null && state.forceDecomposition) {
@@ -780,107 +760,106 @@ export class CanvasRenderer {
   _draw1D(ctx, state) {
     const pa = this._plotArea;
     const dark = isDarkTheme();
+    const base = pa.y + pa.h;
+    const accent = dark ? '#6AE0D8' : '#0D858B';
 
-    // Draw axes
-    this._drawAxes1D(ctx);
+    ctx.save();
+    this._roundRect(ctx, pa.x, pa.y, pa.w, pa.h, 4);
+    ctx.fillStyle = cssVar('--c-graph-surface', dark ? '#222A38' : '#F7F8FC');
+    ctx.fill();
+    ctx.restore();
+    this._drawAxes(ctx);
 
-    // Draw curve
-    const [xmin, xmax] = this._domain[0];
-    const steps = Math.min(Math.floor(pa.w), 600);
-
-    ctx.beginPath();
-    ctx.strokeStyle = dark ? '#94A3B8' : '#475569';
-    ctx.lineWidth = 2;
-
-    for (let i = 0; i <= steps; i++) {
-      const x = xmin + (i / steps) * (xmax - xmin);
-      const y = this._fn(x);
-      const cx = this._toCanvasX(x);
-      const cy = this._toCanvasY(y);
-      if (i === 0) ctx.moveTo(cx, cy);
-      else ctx.lineTo(cx, cy);
-    }
-    ctx.stroke();
-
-    if (!state || !state.particles) return;
-
-    // Draw gbest marker
-    if (this._options.showGbest && state.gbest) {
-      const gx = this._toCanvasX(state.gbest.position[0]);
-      const gy = this._toCanvasY(state.gbest.fitness);
-      ctx.save();
-      ctx.fillStyle = '#FBBF24';
-      ctx.shadowColor = '#FBBF24';
-      ctx.shadowBlur = 10;
-      ctx.font = '18px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('⭐', gx, gy - 14);
-      ctx.restore();
+    if (!this._hasLandscapeData) {
+      this._drawEmptyLandscape(ctx, pa.y + pa.h / 2);
+      return;
     }
 
-    // Draw pbests
+    ctx.save();
+    this._roundRect(ctx, pa.x, pa.y, pa.w, pa.h, 4);
+    ctx.clip();
+    const gradient = ctx.createLinearGradient(0, pa.y, 0, base);
+    gradient.addColorStop(0, dark ? 'rgba(136, 164, 188, .17)' : 'rgba(91, 137, 158, .13)');
+    gradient.addColorStop(1, 'transparent');
+
+    let firstX;
+    let lastX;
+    const finishSegment = () => {
+      if (firstX === undefined) return;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2.4;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.lineTo(lastX, base);
+      ctx.lineTo(firstX, base);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      firstX = undefined;
+    };
+
+    this._curveSamples.forEach((value, index) => {
+      if (!Number.isFinite(value)) {
+        finishSegment();
+        return;
+      }
+      const x = pa.x + index / (this._curveSamples.length - 1) * pa.w;
+      const y = this._toCanvasY(value);
+      if (firstX === undefined) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        firstX = x;
+      } else {
+        ctx.lineTo(x, y);
+      }
+      lastX = x;
+    });
+    finishSegment();
+    ctx.restore();
+    this._drawOptima(ctx);
+    if (!state?.particles) return;
+
     if (this._options.showPbest) {
-      state.particles.forEach((p, i) => {
-        const pbx = this._toCanvasX(p.pbest[0]);
-        const pby = this._toCanvasY(p.pbest_fitness);
-        const col = PARTICLE_PALETTE[i % PARTICLE_PALETTE.length];
-
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 1.5;
-        this._drawDiamond(ctx, pbx, pby, 5, false);
+      state.particles.forEach((particle, index) => {
+        if (!Number.isFinite(particle.pbest_fitness)) return;
+        ctx.strokeStyle = PARTICLE_PALETTE[index % PARTICLE_PALETTE.length];
+        ctx.lineWidth = 1.3;
+        this._drawDiamond(ctx, this._toCanvasX(particle.pbest[0]),
+          this._toCanvasY(particle.pbest_fitness), 6.5, false);
       });
     }
 
-    // Draw particles
-    state.particles.forEach((p, i) => {
-      const x = p.x[0];
-      const fx = p.fitness;
-      const cx = this._toCanvasX(x);
-      const cy = this._toCanvasY(fx);
-      const col = PARTICLE_PALETTE[i % PARTICLE_PALETTE.length];
+    state.particles.forEach((particle, index) => {
+      if (!Number.isFinite(particle.fitness)) return;
+      const x = this._toCanvasX(particle.x[0]);
+      const y = this._toCanvasY(particle.fitness);
+      const color = PARTICLE_PALETTE[index % PARTICLE_PALETTE.length];
+      const velocity = particle.v?.[0];
 
-      // Drop-line to x-axis
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.34;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
       ctx.beginPath();
-      ctx.strokeStyle = col;
-      ctx.globalAlpha = 0.3;
-      ctx.setLineDash([3, 3]);
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx, pa.y + pa.h);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, base);
       ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
+      ctx.restore();
 
-      // Velocity arrow along x-axis
-      if (this._options.showVelocity && p.v && p.v[0] !== 0) {
-        const arrowLen = (p.v[0] / (this._domain[0][1] - this._domain[0][0])) * pa.w;
-        this._drawArrow(ctx, cx, pa.y + pa.h + 12, cx + arrowLen * 0.5, pa.y + pa.h + 12, col, 1.5);
+      if (Number.isFinite(velocity) && velocity !== 0 && this._options.showVelocity) {
+        const [min, max] = this._domain[0];
+        const arrowX = clamp(x + velocity / (max - min) * pa.w * 0.5, pa.x, pa.x + pa.w);
+        const arrowY = clamp(y + 10, pa.y, base - 3);
+        if (Math.abs(arrowX - x) > 3) this._drawArrow(ctx, x, arrowY, arrowX, arrowY, color, 1.5);
       }
 
-      // Particle dot
-      ctx.beginPath();
-      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-      ctx.fillStyle = col;
-      ctx.fill();
-      ctx.strokeStyle = dark ? '#1E293B' : '#FFFFFF';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Pulsing ring
-      if (p.id === this._pulseParticleId ||
-        (state.current_particle_index != null && i === state.current_particle_index)) {
-        this._drawPulseRing(ctx, cx, cy, col);
-      }
-
-      // Label
-      if (this._options.showLabels) {
-        ctx.fillStyle = dark ? '#E2E8F0' : '#1E293B';
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(`P${p.id}`, cx, cy - 10);
-      }
+      this._drawParticleMarker(ctx, this._isActiveParticle(state, particle, index), x, y, color, false);
     });
+
+    if (this._options.showGbest) this._drawGlobalBest(ctx, state);
+    this._drawParticleLabels(ctx, state, false);
   }
 
   // ─── 2D Particle Drawing ─────────────────────────────────────────
@@ -891,51 +870,110 @@ export class CanvasRenderer {
    * @private
    */
   _drawParticles(ctx, state) {
-    const dark = isDarkTheme();
+    const [xMin, xMax] = this._domain[0];
+    const [yMin, yMax] = this._domain[1];
 
-    state.particles.forEach((p, i) => {
-      const cx = this._toCanvasX(p.x[0]);
-      const cy = this._toCanvasY(p.x[1]);
-      const col = PARTICLE_PALETTE[i % PARTICLE_PALETTE.length];
-      const radius = 7;
+    state.particles.forEach((particle, index) => {
+      const x = this._toCanvasX(particle.x[0]);
+      const y = this._toCanvasY(particle.x[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      const color = PARTICLE_PALETTE[index % PARTICLE_PALETTE.length];
 
-      // Velocity arrow
-      if (this._options.showVelocity && p.v) {
-        const domW = this._domain[0][1] - this._domain[0][0];
-        const domH = this._domain[1][1] - this._domain[1][0];
-        const vxPx = (p.v[0] / domW) * this._plotArea.w * 0.3;
-        const vyPx = -(p.v[1] / domH) * this._plotArea.h * 0.3; // inverted y
-        const mag = Math.sqrt(vxPx * vxPx + vyPx * vyPx);
-        if (mag > 2) {
-          const scale = Math.min(1, 50 / mag);
-          this._drawArrow(ctx, cx, cy, cx + vxPx * scale, cy + vyPx * scale, col, 1.5);
+      if (this._options.showVelocity && particle.v) {
+        const vx = particle.v[0] / (xMax - xMin) * this._plotArea.w * 0.3;
+        const vy = -particle.v[1] / (yMax - yMin) * this._plotArea.h * 0.3;
+        const magnitude = Math.hypot(vx, vy);
+        if (magnitude > 2) {
+          const scale = Math.min(1, 50 / magnitude);
+          this._drawArrow(ctx, x, y, x + vx * scale, y + vy * scale, color, 1.5);
         }
       }
 
-      // Particle circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.fillStyle = col;
-      ctx.fill();
-      ctx.strokeStyle = dark ? '#1E293B' : '#FFFFFF';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Pulsing ring for current particle
-      if (p.id === this._pulseParticleId ||
-        (state.current_particle_index != null && i === state.current_particle_index)) {
-        this._drawPulseRing(ctx, cx, cy, col);
-      }
-
-      // ID label
-      if (this._options.showLabels) {
-        ctx.fillStyle = dark ? '#E2E8F0' : '#1E293B';
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(`P${p.id}`, cx, cy - radius - 3);
-      }
+      this._drawParticleMarker(ctx, this._isActiveParticle(state, particle, index), x, y, color, true);
     });
+  }
+
+  _isActiveParticle(state, particle, index) {
+    return this._pulseParticleId === particle.id || index === state.current_particle_index;
+  }
+
+  _drawParticleMarker(ctx, active, x, y, color, onTerrain) {
+    const radius = active ? 6.1 : 4.5;
+    const dark = isDarkTheme();
+    const strongOutline = onTerrain || dark;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 1.4, 0, Math.PI * 2);
+    ctx.strokeStyle = strongOutline ? 'rgba(8, 19, 33, .78)' : 'rgba(24, 62, 76, .36)';
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#F8F9FC';
+    ctx.lineWidth = active ? 1.8 : 1.4;
+    ctx.stroke();
+    ctx.restore();
+
+    if (active) this._drawPulseRing(ctx, x, y, dark ? '#EEF1F8' : '#394D75');
+  }
+
+  _drawParticleLabels(ctx, state, onTerrain) {
+    if (!this._options.showLabels || !state.particles?.length) return;
+    const { x: left, y: top, w, h } = this._plotArea;
+    const dark = isDarkTheme();
+    const labelLimit = Math.min(30, Math.max(4, Math.floor(w * h / 5000)));
+    const priority = (particle, index) => {
+      if (this._options.selectedParticle === particle.id) return 3;
+      if (this._isActiveParticle(state, particle, index)) return 2;
+      return Number(state.gbest?.particle_id === particle.id);
+    };
+    const particles = state.particles
+      .map((particle, index) => ({ particle, rank: priority(particle, index) }))
+      .sort((a, b) => b.rank - a.rank);
+    const placed = [];
+
+    ctx.save();
+    ctx.font = '600 10px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2.8;
+    ctx.strokeStyle = dark ? '#222939' : '#F4F5FA';
+    ctx.fillStyle = dark ? '#EFF1F7' : '#1C2742';
+
+    for (const { particle, rank } of particles) {
+      if (placed.length >= labelLimit) break;
+      const value = onTerrain ? particle.x[1] : particle.fitness;
+      if (!Number.isFinite(particle.x[0]) || !Number.isFinite(value)) continue;
+      const px = this._toCanvasX(particle.x[0]);
+      const py = this._toCanvasY(value);
+      const label = `P${particle.id + 1}`;
+      const halfWidth = ctx.measureText(label).width / 2 + 4;
+      const halfHeight = 7;
+      const nearbyX = clamp(px, left + halfWidth, left + w - halfWidth);
+      const candidates = [[nearbyX, py - 15], [nearbyX, py + 15]];
+      if (rank > 0) {
+        candidates.push([px - halfWidth - 9, py], [px + halfWidth + 9, py],
+          [nearbyX, py - 29], [nearbyX, py + 29]);
+      }
+
+      const position = candidates.find(([x, y]) =>
+        x - halfWidth >= left && x + halfWidth <= left + w &&
+        y - halfHeight >= top && y + halfHeight <= top + h &&
+        !placed.some(other => Math.abs(x - other.x) < halfWidth + other.halfWidth &&
+          Math.abs(y - other.y) < 2 * halfHeight));
+      if (!position) continue;
+
+      const [x, y] = position;
+      ctx.strokeText(label, x, y);
+      ctx.fillText(label, x, y);
+      placed.push({ x, y, halfWidth });
+    }
+    ctx.restore();
   }
 
   /**
@@ -979,7 +1017,7 @@ export class CanvasRenderer {
    */
   _drawPbests(ctx, state) {
     state.particles.forEach((p, i) => {
-      if (!p.pbest || p.pbest.length < 2) return;
+      if (!p.pbest || p.pbest.length < 2 || !Number.isFinite(p.pbest_fitness)) return;
       const px = this._toCanvasX(p.pbest[0]);
       const py = this._toCanvasY(p.pbest[1]);
       const cx = this._toCanvasX(p.x[0]);
@@ -1034,20 +1072,29 @@ export class CanvasRenderer {
    * @private
    */
   _drawGlobalBest(ctx, state) {
-    if (!state.gbest || !state.gbest.position) return;
-    const dim = this._dimensions;
-    const gx = this._toCanvasX(state.gbest.position[0]);
-    const gy = dim === 2 ? this._toCanvasY(state.gbest.position[1]) :
-      this._toCanvasY(state.gbest.fitness);
+    const best = state.gbest;
+    if (!best?.position || !Number.isFinite(best.fitness)) return;
+    const positionY = this._dimensions === 2 ? best.position[1] : best.fitness;
+    if (!Number.isFinite(best.position[0]) || !Number.isFinite(positionY)) return;
+    const x = this._toCanvasX(best.position[0]);
+    const y = this._toCanvasY(positionY);
 
     ctx.save();
-    ctx.shadowColor = '#FBBF24';
-    ctx.shadowBlur = 14;
-    ctx.fillStyle = '#FBBF24';
-    ctx.font = '20px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('⭐', gx, gy);
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, Math.PI * 2);
+    for (let step = 0; step < 4; step++) {
+      const angle = step * Math.PI / 2;
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      ctx.moveTo(x + 10 * dx, y + 10 * dy);
+      ctx.lineTo(x + 13.5 * dx, y + 13.5 * dy);
+    }
+    ctx.strokeStyle = '#24364A';
+    ctx.lineWidth = 3.7;
+    ctx.stroke();
+    ctx.strokeStyle = '#FFD78C';
+    ctx.lineWidth = 1.65;
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1248,186 +1295,141 @@ export class CanvasRenderer {
 
   /** @private */
   _drawOptima(ctx) {
-    if (!this._knownOptima || this._knownOptima.length === 0) return;
     const dark = isDarkTheme();
-
-    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 1.5;
-    ctx.font = '14px system-ui, sans-serif';
-    ctx.fillStyle = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
-
-    this._knownOptima.forEach((pos) => {
-      const cx = this._toCanvasX(pos[0]);
-      const cy = this._dimensions === 2 ? this._toCanvasY(pos[1]) : this._toCanvasY(this._fn(pos[0]));
-      const s = 6;
-      ctx.beginPath();
-      ctx.moveTo(cx - s, cy - s);
-      ctx.lineTo(cx + s, cy + s);
-      ctx.moveTo(cx + s, cy - s);
-      ctx.lineTo(cx - s, cy + s);
-      ctx.stroke();
-    });
-  }
-
-  // ─── Axes ─────────────────────────────────────────────────────────
-
-  /** @private */
-  _drawAxes2D(ctx) {
-    const pa = this._plotArea;
-    const dark = isDarkTheme();
-    const textCol = dark ? '#94A3B8' : '#64748B';
-    const lineCol = dark ? '#334155' : '#CBD5E1';
-
-    ctx.strokeStyle = lineCol;
-    ctx.lineWidth = 1;
-    ctx.fillStyle = textCol;
-    ctx.font = '11px system-ui, sans-serif';
-
-    // Border
-    ctx.strokeRect(pa.x, pa.y, pa.w, pa.h);
-
-    // X-axis ticks
-    const xTicks = this._niceTicks(this._domain[0][0], this._domain[0][1], 6);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    xTicks.forEach((val) => {
-      const x = this._toCanvasX(val);
-      ctx.beginPath();
-      ctx.moveTo(x, pa.y + pa.h);
-      ctx.lineTo(x, pa.y + pa.h + 5);
-      ctx.stroke();
-      ctx.fillText(this._formatTick(val), x, pa.y + pa.h + 7);
-    });
-
-    // X label
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText('x₁', pa.x + pa.w / 2, pa.y + pa.h + 24);
-
-    // Y-axis ticks
-    ctx.font = '11px system-ui, sans-serif';
-    const yTicks = this._niceTicks(this._domain[1][0], this._domain[1][1], 6);
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    yTicks.forEach((val) => {
-      const y = this._toCanvasY(val);
-      ctx.beginPath();
-      ctx.moveTo(pa.x - 5, y);
-      ctx.lineTo(pa.x, y);
-      ctx.stroke();
-      ctx.fillText(this._formatTick(val), pa.x - 8, y);
-    });
-
-    // Y label
     ctx.save();
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.translate(14, pa.y + pa.h / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('x₂', 0, 0);
+    for (const position of this._knownOptima) {
+      const value = this._dimensions === 2 ? position[1] : this._fn(position[0]);
+      if (!Number.isFinite(value)) continue;
+      const x = this._toCanvasX(position[0]);
+      const y = this._toCanvasY(value);
+      ctx.beginPath();
+      ctx.moveTo(x - 5, y - 5);
+      ctx.lineTo(x + 5, y + 5);
+      ctx.moveTo(x + 5, y - 5);
+      ctx.lineTo(x - 5, y + 5);
+      ctx.strokeStyle = dark ? '#222939' : '#F4F5FA';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.strokeStyle = dark ? '#E8EBF5' : '#374766';
+      ctx.lineWidth = 1.35;
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
-  /** @private */
-  _drawAxes1D(ctx) {
-    const pa = this._plotArea;
+  // ─── Axes & legend ─────────────────────────────────────────────────
+
+  _drawAxes(ctx) {
+    const { x, y, w, h } = this._plotArea;
+    const bottom = y + h;
     const dark = isDarkTheme();
-    const textCol = dark ? '#94A3B8' : '#64748B';
-    const lineCol = dark ? '#334155' : '#CBD5E1';
-
-    ctx.strokeStyle = lineCol;
-    ctx.lineWidth = 1;
-    ctx.fillStyle = textCol;
-
-    // Border
-    ctx.strokeRect(pa.x, pa.y, pa.w, pa.h);
-
-    // X-axis
-    const xTicks = this._niceTicks(this._domain[0][0], this._domain[0][1], 8);
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    xTicks.forEach((val) => {
-      const x = this._toCanvasX(val);
-      ctx.beginPath();
-      ctx.moveTo(x, pa.y + pa.h);
-      ctx.lineTo(x, pa.y + pa.h + 5);
-      ctx.stroke();
-      ctx.fillText(this._formatTick(val), x, pa.y + pa.h + 7);
-    });
-
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText('x', pa.x + pa.w / 2, pa.y + pa.h + 24);
-
-    // Y-axis
-    const yTicks = this._niceTicks(this._fMin, this._fMax, 6);
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    yTicks.forEach((val) => {
-      const y = this._toCanvasY(val);
-      ctx.beginPath();
-      ctx.moveTo(pa.x - 5, y);
-      ctx.lineTo(pa.x, y);
-      ctx.stroke();
-      ctx.fillText(this._formatTick(val), pa.x - 8, y);
-
-      // Grid line
-      ctx.save();
-      ctx.strokeStyle = dark ? 'rgba(51,65,85,0.5)' : 'rgba(203,213,225,0.5)';
-      ctx.setLineDash([3, 4]);
-      ctx.beginPath();
-      ctx.moveTo(pa.x, y);
-      ctx.lineTo(pa.x + pa.w, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    });
+    const curve = this._dimensions === 1;
+    const xTicks = this._niceTicks(...this._domain[0], w < 325 ? 4 : 7);
+    const yDomain = curve ? [this._fMin, this._fMax] : this._domain[1];
+    const yTicks = this._niceTicks(...yDomain, h < 185 ? 3 : 6);
 
     ctx.save();
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.translate(14, pa.y + pa.h / 2);
-    ctx.rotate(-Math.PI / 2);
+    ctx.lineWidth = 1;
+    ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
+    ctx.fillStyle = dark ? '#B8C9D7' : '#496378';
+    ctx.textBaseline = 'top';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('f(x)', 0, 0);
-    ctx.restore();
-  }
+    const grid = dark ? 'rgba(191, 199, 214, .14)' : 'rgba(73, 86, 117, .15)';
+    const origin = dark ? 'rgba(191, 199, 214, .27)' : 'rgba(73, 86, 117, .27)';
 
-  // ─── Colour-Scale Legend ──────────────────────────────────────────
-
-  /** @private */
-  _drawLegend(ctx) {
-    const pa = this._plotArea;
-    const dark = isDarkTheme();
-    const lx = pa.x + pa.w + 15;
-    const ly = pa.y;
-    const lw = 16;
-    const lh = pa.h;
-    const palette = this._options.colorblind ? GRAYSCALE_HEATMAP : VIRIDIS_REVERSED;
-
-    // Draw gradient bar
-    for (let i = 0; i < lh; i++) {
-      const t = 1 - i / lh; // top = max, bottom = min
-      const ci = Math.round(t * 255);
-      const [r, g, b] = palette[ci];
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(lx, ly + i, lw, 1);
+    for (const value of xTicks) {
+      const px = this._toCanvasX(value);
+      ctx.strokeStyle = value === 0 ? origin : grid;
+      ctx.beginPath();
+      ctx.moveTo(px, y);
+      ctx.lineTo(px, bottom);
+      ctx.stroke();
+      ctx.fillText(this._formatTick(value), px, bottom + 6);
     }
 
-    // Border
-    ctx.strokeStyle = dark ? '#334155' : '#CBD5E1';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(lx, ly, lw, lh);
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (const value of yTicks) {
+      const py = this._toCanvasY(value);
+      ctx.strokeStyle = value === 0 ? origin : grid;
+      ctx.beginPath();
+      ctx.moveTo(x, py);
+      ctx.lineTo(x + w, py);
+      ctx.stroke();
+      ctx.fillText(this._formatTick(value), x - 6, py, x - 17);
+    }
 
-    // Min/max labels
-    ctx.fillStyle = dark ? '#94A3B8' : '#64748B';
-    ctx.font = '10px system-ui, sans-serif';
+    this._roundRect(ctx, x, y, w, h, 4);
+    ctx.strokeStyle = dark ? '#505D73' : '#C3C9DA';
+    ctx.stroke();
+
+    ctx.fillStyle = dark ? '#DDEDF6' : '#304D65';
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(curve ? 'x' : 'x₁', x + w / 2, bottom + 27);
+    ctx.translate(11, y + h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(curve ? 'f(x)' : 'x₂', 0, 0);
+    ctx.restore();
+  }
+
+  _drawEmptyLandscape(ctx, y) {
+    ctx.fillStyle = isDarkTheme() ? '#BDCEDA' : '#496378';
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No finite fitness samples', this._plotArea.x + this._plotArea.w / 2, y);
+  }
+
+  _drawLegend(ctx) {
+    const { x, y, w, h } = this._plotArea;
+    const centerY = y + h + 48;
+    if (!this._hasLandscapeData) {
+      this._drawEmptyLandscape(ctx, centerY);
+      return;
+    }
+
+    const low = this._formatTick(this._fMin);
+    const high = this._formatTick(this._fMax);
+    const dark = isDarkTheme();
+    const palette = this._getLandscapePalette(dark);
+    const label = 'Fitness';
+    const labelFont = '600 11px Inter, system-ui, sans-serif';
+    const valueFont = '10px "JetBrains Mono", ui-monospace, monospace';
+
+    ctx.save();
+    ctx.font = labelFont;
+    const headingWidth = ctx.measureText(label).width;
+    ctx.font = valueFont;
+    const lowWidth = ctx.measureText(low).width;
+    const highWidth = ctx.measureText(high).width;
+    const textWidth = headingWidth + lowWidth + highWidth + 29;
+    const barWidth = Math.min(172, Math.max(20, w - textWidth));
+    const startX = x + (w - textWidth - barWidth) / 2;
+    const barX = startX + headingWidth + lowWidth + 20;
+
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(this._formatTick(this._fMax), lx + lw + 4, ly);
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(this._formatTick(this._fMin), lx + lw + 4, ly + lh);
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = dark ? '#DDEDF6' : '#304D65';
+    ctx.font = labelFont;
+    ctx.fillText(label, startX, centerY);
+    ctx.font = valueFont;
+    ctx.fillStyle = dark ? '#B8C9D7' : '#496378';
+    ctx.fillText(low, startX + headingWidth + 12, centerY);
+    ctx.fillText(high, barX + barWidth + 8, centerY);
+
+    const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
+    for (let index = 0; index <= 16; index++) {
+      const color = palette[Math.round(index / 16 * 255)];
+      gradient.addColorStop(index / 16, `rgb(${color.join(', ')})`);
+    }
+    this._roundRect(ctx, barX, centerY - 3.5, barWidth, 7, 3);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    ctx.strokeStyle = dark ? '#58657D' : '#A9B3CA';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ─── Arrow Drawing ────────────────────────────────────────────────
@@ -1509,7 +1511,9 @@ export class CanvasRenderer {
   _niceTicks(lo, hi, approxCount = 6) {
     if (lo === hi) return [lo];
     const range = hi - lo;
+    if (!Number.isFinite(range)) return [lo, 0, hi];
     const rough = range / approxCount;
+    if (!(rough > 0)) return [lo];
     const mag = Math.pow(10, Math.floor(Math.log10(rough)));
     const residual = rough / mag;
     let step;
@@ -1520,8 +1524,10 @@ export class CanvasRenderer {
 
     const ticks = [];
     const start = Math.ceil(lo / step) * step;
-    for (let v = start; v <= hi + step * 0.001; v += step) {
-      ticks.push(v);
+    if (!(step > 0)) return [lo];
+    for (let v = start; ticks.length < 16 && v <= hi + step * 0.001; v += step) {
+      if (v === ticks.at(-1)) break;
+      ticks.push(Math.abs(v) < step * 1e-6 ? 0 : v);
     }
     return ticks;
   }
@@ -1613,6 +1619,7 @@ export class CanvasRenderer {
     const state = this._lastState;
     if (state.particles) {
       for (const p of state.particles) {
+        if (this._dimensions === 1 && !Number.isFinite(p.fitness)) continue;
         const cx = this._toCanvasX(p.x[0]);
         const cy = this._dimensions === 2 ? this._toCanvasY(p.x[1]) :
           this._toCanvasY(p.fitness);
@@ -1620,12 +1627,12 @@ export class CanvasRenderer {
 
         if (dist < 14) {
           const lines = [
-            `P${p.id}`,
+            `P${p.id + 1}`,
             `x: [${p.x.map(v => v.toFixed(4)).join(', ')}]`,
             `v: [${p.v.map(v => v.toFixed(4)).join(', ')}]`,
-            `f(x): ${p.fitness.toFixed(6)}`,
+            `f(x): ${formatFitness(p.fitness)}`,
             `pbest: [${p.pbest.map(v => v.toFixed(4)).join(', ')}]`,
-            `f(pbest): ${p.pbest_fitness.toFixed(6)}`,
+            `f(pbest): ${formatFitness(p.pbest_fitness)}`,
           ];
           this._showTooltip(mx, my, lines.join('\n'));
           return;
@@ -1640,10 +1647,10 @@ export class CanvasRenderer {
       let text;
       if (this._dimensions === 1) {
         const fv = this._fn(pt.x);
-        text = `x: ${pt.x.toFixed(4)}\nf(x): ${fv.toFixed(6)}`;
+        text = `x: ${pt.x.toFixed(4)}\nf(x): ${formatFitness(fv)}`;
       } else {
         const fv = this._fn(pt.x, pt.y);
-        text = `x₁: ${pt.x.toFixed(4)}\nx₂: ${pt.y.toFixed(4)}\nf(x): ${fv.toFixed(6)}`;
+        text = `x₁: ${pt.x.toFixed(4)}\nx₂: ${pt.y.toFixed(4)}\nf(x): ${formatFitness(fv)}`;
       }
       this._showTooltip(mx, my, text);
     } else {
@@ -1661,8 +1668,10 @@ export class CanvasRenderer {
     this._updateTooltipTheme();
     this._tooltip.textContent = text;
     this._tooltip.style.opacity = '1';
-    this._tooltip.style.left = (x + 14) + 'px';
-    this._tooltip.style.top = (y - 10) + 'px';
+    const left = clamp(x + 14, 6, Math.max(6, this._width - this._tooltip.offsetWidth - 6));
+    const top = clamp(y - 10, 6, Math.max(6, this._height - this._tooltip.offsetHeight - 6));
+    this._tooltip.style.left = left + 'px';
+    this._tooltip.style.top = top + 'px';
   }
 
   /** @private */

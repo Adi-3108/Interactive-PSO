@@ -796,6 +796,7 @@ class SwarmLabApp {
         root.dataset.colorblind = String(enabled);
         savePreference('swarmlab_colorblind', String(enabled));
         this.canvasRenderer?.setOptions({ colorblind: enabled });
+        this.compareManager?.chart?.render();
       });
     }
   }

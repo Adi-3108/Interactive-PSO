@@ -72,6 +72,8 @@
   --c-border: #D9E2EC;
   --c-surface-muted: #EEF4F7;
   --c-surface-raised: #FFFFFF;
+  --c-graph-frame: #FCFBFD;
+  --c-graph-surface: #F7F8FC;
   --c-text-strong: #172033;
   --c-text-soft: #52677B;
   --c-table-header: #EAF1F5;
@@ -102,6 +104,8 @@
   --c-border: #263B4D;
   --c-surface-muted: #15263A;
   --c-surface-raised: #17263A;
+  --c-graph-frame: #1B222E;
+  --c-graph-surface: #222A38;
   --c-text-strong: #F1F7FB;
   --c-text-soft: #B6C7D5;
   --c-table-header: #0C1726;

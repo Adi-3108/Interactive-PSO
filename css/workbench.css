@@ -200,7 +200,7 @@
   min-height: 0;
   margin: 0;
   border-color: var(--c-border);
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: none;
 }
 
@@ -338,6 +338,18 @@
 .panel-center .bottom-tabs__content { max-height: 465px; }
 .panel-center .bottom-tabs__header .tab { padding: 12px 3px 10px; }
 .panel-center .bottom-tabs__header .tab--contextual[aria-selected='true'] { display: inline-flex; }
+
+#canvas-convergence,
+#canvas-diversity,
+#comp-convergence-canvas {
+  display: block;
+  border-radius: 8px;
+  background: var(--c-graph-surface);
+  box-shadow: inset 0 0 0 1px var(--c-border);
+}
+
+#canvas-convergence,
+#canvas-diversity { cursor: crosshair; }
 
 .swarm-readout {
   display: grid;
